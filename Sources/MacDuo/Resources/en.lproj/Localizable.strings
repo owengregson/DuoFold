@@ -10,6 +10,7 @@
 "Ends the effect once the angle stops changing." = "Ends the effect once the angle stops changing.";
 "Start angle" = "Start angle";
 "The effect starts at this angle." = "The effect starts at this angle.";
+"Lowered to %.0f° so opening the lid fully still ends the effect." = "Lowered to %.0f° so opening the lid fully still ends the effect.";
 "Full effect after" = "Full effect after";
 "Degrees of further closing to reach full strength." = "Degrees of further closing to reach full strength.";
 "Look" = "Look";

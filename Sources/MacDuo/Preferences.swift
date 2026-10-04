@@ -129,6 +129,39 @@ final class Preferences: ObservableObject {
     /// Degrees above the threshold before the overlay is released.
     let hysteresis: Double = 4
 
+    /// The widest angle this Mac's lid has been held at, which keeps the start
+    /// angle low enough to release. A measurement rather than a setting, so
+    /// Reset keeps it. Stored for this Mac only, so that a home folder moved
+    /// to another MacBook does not bring the old hinge along. Forget it with
+    /// `defaults -currentHost delete to.maki.MacDuo hingeLimit`.
+    var hingeLimit: Double? {
+        get {
+            let value = CFPreferencesCopyValue(
+                Self.hingeLimitKey,
+                kCFPreferencesCurrentApplication,
+                kCFPreferencesCurrentUser,
+                kCFPreferencesCurrentHost
+            )
+            return (value as? NSNumber)?.doubleValue
+        }
+        set {
+            CFPreferencesSetValue(
+                Self.hingeLimitKey,
+                newValue.map { $0 as NSNumber },
+                kCFPreferencesCurrentApplication,
+                kCFPreferencesCurrentUser,
+                kCFPreferencesCurrentHost
+            )
+            CFPreferencesSynchronize(
+                kCFPreferencesCurrentApplication,
+                kCFPreferencesCurrentUser,
+                kCFPreferencesCurrentHost
+            )
+        }
+    }
+
+    private static let hingeLimitKey = "hingeLimit" as CFString
+
     /// Settings from earlier versions, removed at launch.
     private static let retired = [
         "blurFrontWidth", "maxTilt", "tiltDegrees", "tiltRatio", "dimEvenness",
