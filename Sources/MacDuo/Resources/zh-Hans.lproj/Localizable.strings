@@ -25,6 +25,8 @@
 "Lean back" = "后倾幅度";
 "Degrees of lean per degree of closing. 1 holds it still." = "每合上 1° 时画面的后倾角度。设为 1 时，画面在空间中保持不动。";
 "0 keeps the sides parallel, 100 converges sharply." = "0 保持两侧平行，100 则使两侧明显向内收拢。";
+"Show icon in menu bar" = "在菜单栏显示图标";
+"When off, open Mac Duo again to show these settings." = "关闭后，再次打开 Mac Duo 即可显示这些设置。";
 "Show angle in menu bar" = "在菜单栏显示角度";
 "Launch at login" = "登录时启动";
 "Reset" = "重置";

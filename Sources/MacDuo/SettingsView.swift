@@ -173,7 +173,13 @@ struct SettingsView: View {
                 .fixedSize()
                 .accessibilityLabel(localized("Language"))
             }
+            toggleRow(
+                localized("Show icon in menu bar"),
+                isOn: $preferences.showsMenuBarIcon,
+                help: localized("When off, open Mac Duo again to show these settings.")
+            )
             toggleRow(localized("Show angle in menu bar"), isOn: $preferences.showsAngleInMenuBar, help: nil)
+                .disabled(!preferences.showsMenuBarIcon)
             toggleRow(localized("Launch at login"), isOn: $launchesAtLogin, help: nil)
                 .onChange(of: launchesAtLogin) { _, newValue in
                     setLaunchAtLogin(newValue)

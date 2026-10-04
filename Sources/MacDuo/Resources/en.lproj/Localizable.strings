@@ -25,6 +25,8 @@
 "Lean back" = "Lean back";
 "Degrees of lean per degree of closing. 1 holds it still." = "Degrees of lean per degree of closing. 1 holds it still.";
 "0 keeps the sides parallel, 100 converges sharply." = "0 keeps the sides parallel, 100 converges sharply.";
+"Show icon in menu bar" = "Show icon in menu bar";
+"When off, open Mac Duo again to show these settings." = "When off, open Mac Duo again to show these settings.";
 "Show angle in menu bar" = "Show angle in menu bar";
 "Launch at login" = "Launch at login";
 "Reset" = "Reset";
