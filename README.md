@@ -19,9 +19,10 @@ Mac Duo adds this effect to your MacBook, with controls in the menu bar.
 
 With the default settings, it's recommended to view the effect in front of your MacBook.
 
-- **Metal rendering:** Uses GPU rendering to apply perspective, blur, and dimming as the lid closes.
-- **Live screen content:** Uses ScreenCaptureKit to capture and render screen content in real time.
-- **Adjustable perspective:** Tweak the perspective to suit your viewing position and make the effect look more natural.
+- **Window server rendering:** By default the macOS window server blurs and dims the live screen itself, modelled on a frosted sheet lifted off a page: the screen stays where the glass started, each point blurs by how far the glass has moved away from it, sharp at the hinge, and darkens by the light it loses. Nothing is captured, so no Screen Recording permission is needed.
+- **Low power:** The lid sensor pushes its readings, so the app sleeps until the lid moves.
+- **Metal rendering:** Turn on "Screen capture" to capture the screen with ScreenCaptureKit and render it with Metal instead, with the picture leaning back.
+- **Adjustable perspective:** With screen capture, tweak the lean and perspective to suit your viewing position.
 
 
 > [!NOTE]
@@ -36,7 +37,7 @@ With the default settings, it's recommended to view the effect in front of your 
 These downloads contain the latest [development build](https://github.com/sumimakito/Mac-Duo/releases/tag/dev) for Apple Silicon and Intel Macs.
 
 Requires macOS 14 or later and a MacBook with a compatible lid angle sensor.
-Grant Screen Recording permission when prompted to enable the effect.
+Screen Recording permission is only needed if you turn on "Screen capture".
 
 ## Build
 
@@ -61,6 +62,8 @@ macOS may require Screen Recording permission again after rebuilding with ad-hoc
 - The effect applies only to the built-in display.
 - The effect stops when macOS sleeps as the lid closes.
 - Clicks pass through the effect to the apps underneath. Press Escape to end the effect at once; Mac Duo only takes the key while the effect covers the screen.
+- The window server effect relies on private Core Animation classes. If a macOS release removes them, the app captures the screen instead.
+- The lid sensor's report rate is shared by the whole system and outlives the app. Mac Duo puts it back whenever it quits or the Mac sleeps, but cannot when it is force quit; `build/lidprobe reset` puts it back then, as does the next normal quit.
 
 ## Acknowledgements
 

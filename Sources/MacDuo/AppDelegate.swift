@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = LidController(preferences: preferences)
         self.controller = controller
         statusItemController = StatusItemController(controller: controller, preferences: preferences)
+        // Before the controller sets the sensor's report interval.
+        TerminationSignals.routeToTerminate()
         controller.start()
     }
 

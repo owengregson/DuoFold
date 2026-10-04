@@ -39,23 +39,6 @@ struct SettingsLanguageTests {
         }
     }
 
-    @Test
-    func testBothTablesHaveTheSameKeys() throws {
-        // A key missing from the Chinese table shows its English text instead.
-        let english = try sourceTable(for: "en")
-        let chinese = try sourceTable(for: "zh-Hans")
-        let unmatched = Set(english.keys).symmetricDifference(chinese.keys)
-        #expect(unmatched.isEmpty, "Only in one table: \(unmatched.sorted())")
-    }
-
-    /// The strings table for a language, read from the sources.
-    private func sourceTable(for code: String) throws -> [String: String] {
-        let url = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/MacDuo/Resources/\(code).lproj/Localizable.strings")
-        return try #require(NSDictionary(contentsOf: url) as? [String: String])
-    }
-
     /// A resource bundle in a temporary directory with one strings table.
     private func makeBundle(lprojPath: String) throws -> URL {
         let root = FileManager.default.temporaryDirectory

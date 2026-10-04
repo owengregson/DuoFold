@@ -63,6 +63,8 @@ struct DepthTuning {
     var dimReach: Double = 0.7
     var maxBlurRadius: Double = 55
     var maxDim: Double = 0.4
+    /// How diffuse the window server's glass is.
+    var frost: Double = 0.7
 }
 
 private final class MetalHostView: NSView {
@@ -99,6 +101,13 @@ final class DepthOverlay {
     private var hasTriedToBuildRenderer = false
     private var buildToken = 0
     private let buildQueue = DispatchQueue(label: "MacDuo.pictureUpload", qos: .userInteractive)
+    /// The window server's glass, built ahead of time and kept hidden
+    /// between runs, so a close shows it on the next frame instead of
+    /// waiting for a new window.
+    private var glassWindow: OverlayWindow?
+    private var glassView: FrostedGlassView?
+    /// True while the run on screen is the glass rather than the renderer.
+    private var showsGlass = false
 
     private var screenSize: CGSize = .zero
     private var startAngle: Double = 90
@@ -112,7 +121,7 @@ final class DepthOverlay {
     /// True once the picture has faded in over the screen. A live window
     /// waits transparent for its first frame, and that hides nothing.
     var isRevealed: Bool { window != nil && hasRevealed }
-    var isPictureReady: Bool { renderer?.isReady ?? false }
+    var isPictureReady: Bool { showsGlass || (renderer?.isReady ?? false) }
     var hostWindow: NSWindow? { window }
 
     @discardableResult
@@ -191,6 +200,56 @@ final class DepthOverlay {
         renderer?.discardLive()
     }
 
+    /// Builds the glass for `screen`, hidden, unless one for that screen is
+    /// already waiting. A few layers and no drawing until it is shown.
+    func prepareGlass(on screen: NSScreen) {
+        guard WindowServerBlur.isAvailable else { return }
+        if let glassWindow, glassWindow.frame == screen.frame,
+           glassView?.layer?.contentsScale == screen.backingScaleFactor { return }
+        if let old = glassWindow {
+            // One on screen finishes its run first; the next run rebuilds.
+            guard window !== old else { return }
+            if fadingWindow === old { fadingWindow = nil }
+            old.orderOut(nil)
+            old.close()
+        }
+        let view = FrostedGlassView(
+            frame: NSRect(origin: .zero, size: screen.frame.size),
+            scale: screen.backingScaleFactor
+        )
+        view.autoresizingMask = [.width, .height]
+        let window = makeOverlayWindow(on: screen, contentView: view)
+        window.alphaValue = 0
+        glassView = view
+        glassWindow = window
+    }
+
+    /// Shows the glass, through which the window server blurs and dims
+    /// whatever is behind it. Nothing is captured. Flat, the glass is the
+    /// screen itself, so it shows at once with no fade.
+    @discardableResult
+    func showGlass(on screen: NSScreen, startAngle: Double, tuning: DepthTuning) -> Bool {
+        dismiss(animated: false)
+        prepareGlass(on: screen)
+        guard let glassWindow, glassView != nil else { return false }
+        self.startAngle = startAngle
+        self.tuning = tuning
+        screenSize = screen.frame.size
+        buildToken += 1
+        showsGlass = true
+        window = glassWindow
+        hasRevealed = true
+        update(progress: 0, currentAngle: startAngle, tuning: tuning)
+        // Takes over from a fade out that may still be running.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            glassWindow.animator().alphaValue = 1
+        }
+        glassWindow.alphaValue = 1
+        glassWindow.orderFrontRegardless()
+        return true
+    }
+
 
     func show(
         image: CGImage,
@@ -240,6 +299,14 @@ final class DepthOverlay {
         view.frame = NSRect(origin: .zero, size: screenSize)
         view.autoresizingMask = [.width, .height]
 
+        let window = makeOverlayWindow(on: screen, contentView: view)
+        window.alphaValue = 0
+        window.orderFrontRegardless()
+        hasRevealed = false
+        self.window = window
+    }
+
+    private func makeOverlayWindow(on screen: NSScreen, contentView view: NSView) -> OverlayWindow {
         let window = OverlayWindow(
             contentRect: screen.frame,
             styleMask: .borderless,
@@ -253,12 +320,12 @@ final class DepthOverlay {
         window.ignoresMouseEvents = true
         window.isReleasedWhenClosed = false
         window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
-        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        // On every space, full screen ones too, and floating above them while
+        // they slide. `.stationary` keeps a window still like the desktop,
+        // which slides away with its space on a swipe between spaces.
+        window.collectionBehavior = [.canJoinAllSpaces, .transient, .fullScreenAuxiliary, .ignoresCycle]
         window.setFrame(screen.frame, display: false)
-        window.alphaValue = 0
-        window.orderFrontRegardless()
-        hasRevealed = false
-        self.window = window
+        return window
     }
 
     /// Fades the window in once, and only once the picture has something to
@@ -274,6 +341,17 @@ final class DepthOverlay {
     }
 
     func update(progress: Double, currentAngle: Double, tuning: DepthTuning) {
+        if showsGlass, let glassView {
+            // The glass is lifted off the screen it left by the whole of the
+            // lid's travel, and the optics take it from there.
+            self.tuning = tuning
+            glassView.apply(
+                lift: max(startAngle - currentAngle, 0) * .pi / 180,
+                frost: tuning.frost,
+                darkness: tuning.maxDim
+            )
+            return
+        }
         guard let renderer, renderer.isReady else { return }
         self.tuning = tuning
         renderer.render(
@@ -300,10 +378,10 @@ final class DepthOverlay {
         self.window = nil
         buildToken += 1
         renderer?.release()
+        showsGlass = false
 
         guard animated else {
-            window.orderOut(nil)
-            window.close()
+            takeDown(window)
             return
         }
 
@@ -314,9 +392,15 @@ final class DepthOverlay {
             window.animator().alphaValue = 0
         } completionHandler: { [weak self] in
             MainActor.assumeIsolated {
-                if let self, self.fadingWindow === window { self.fadingWindow = nil }
-                window.orderOut(nil)
-                window.close()
+                guard let self else {
+                    window.orderOut(nil)
+                    window.close()
+                    return
+                }
+                // A new run may have taken the glass back over meanwhile.
+                guard self.fadingWindow === window else { return }
+                self.fadingWindow = nil
+                self.takeDown(window)
             }
         }
     }
@@ -325,7 +409,12 @@ final class DepthOverlay {
     private func closeFadingWindow() {
         guard let fadingWindow else { return }
         self.fadingWindow = nil
-        fadingWindow.orderOut(nil)
-        fadingWindow.close()
+        takeDown(fadingWindow)
+    }
+
+    /// The glass is hidden and kept for the next run; any other window goes.
+    private func takeDown(_ window: OverlayWindow) {
+        window.orderOut(nil)
+        if window !== glassWindow { window.close() }
     }
 }

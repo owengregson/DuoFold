@@ -11,7 +11,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let popover = NSPopover()
     private let preferences: Preferences
     private let controller: LidController
-    private var titleTimer: Timer?
+    private var titleSubscription: AnyCancellable?
     private var barWindowMoved: NSObjectProtocol?
     private var iconSubscription: AnyCancellable?
     /// Built on first use, then reused.
@@ -42,15 +42,27 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         hostingController.sizingOptions = [.preferredContentSize]
         popover.contentViewController = hostingController
 
+        // Only when the shown angle or the setting changes, never on a timer:
+        // a still lid then wakes nothing. Published values arrive before
+        // they are stored, so the title is drawn on the next turn.
+        titleSubscription = controller.$currentAngle
+            // The same rounding as the title itself.
+            .map { String(format: "%.0f", $0) }
+            .removeDuplicates()
+            .combineLatest(preferences.$showsAngleInMenuBar.removeDuplicates())
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshTitle() }
+            }
+        refreshTitle()
         watchBarWindow()
-        // Delivers the stored value straight away, which also starts the title timer.
+        // Delivers the stored value straight away.
         iconSubscription = preferences.$showsMenuBarIcon
             .removeDuplicates()
             .sink { [weak self] shows in self?.setIconShown(shows) }
     }
 
     deinit {
-        titleTimer?.invalidate()
         if let barWindowMoved {
             NotificationCenter.default.removeObserver(barWindowMoved)
         }
@@ -145,27 +157,11 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     /// `isVisible` rather than removing the item, which would give up its
     /// place in the menu bar.
     private func setIconShown(_ shown: Bool) {
-        if shown {
-            statusItem.isVisible = true
-            startTitleTimer()
-        } else {
+        if !shown {
             // The popover would be left hanging from nothing.
             popover.close()
-            statusItem.isVisible = false
-            titleTimer?.invalidate()
-            titleTimer = nil
         }
-    }
-
-    /// The title is all it updates, so it only runs while the item shows.
-    private func startTitleTimer() {
-        guard titleTimer == nil else { return }
-        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshTitle() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        titleTimer = timer
-        refreshTitle()
+        statusItem.isVisible = shown
     }
 
     /// Showing the angle changes the button width, and the status item window
@@ -204,5 +200,15 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         } else if !button.title.isEmpty {
             button.title = ""
         }
+    }
+
+    // The panel shows the live angle, which needs the sensor read while it
+    // is open.
+    func popoverWillShow(_ notification: Notification) {
+        controller.isPanelOpen = true
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        controller.isPanelOpen = false
     }
 }
