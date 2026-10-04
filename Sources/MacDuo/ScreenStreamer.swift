@@ -45,6 +45,7 @@ final class ScreenStreamer {
         ) {
             guard type == .screen,
                   CMSampleBufferIsValid(sampleBuffer),
+                  Self.isComplete(sampleBuffer),
                   let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
             // Lets go of the surfaces nothing holds, so the pool keeps recycling.
@@ -69,6 +70,18 @@ final class ScreenStreamer {
             newest = frame
             newestID &+= 1
             lock.unlock()
+        }
+
+        /// Only complete frames carry new pixels. An idle frame repeats the
+        /// last one, and taking it would rebuild the blur for nothing.
+        private static func isComplete(_ sampleBuffer: CMSampleBuffer) -> Bool {
+            guard let attachments = CMSampleBufferGetSampleAttachmentsArray(
+                sampleBuffer,
+                createIfNecessary: false
+            ) as? [[SCStreamFrameInfo: Any]],
+                let rawStatus = attachments.first?[.status] as? Int,
+                let status = SCFrameStatus(rawValue: rawStatus) else { return true }
+            return status == .complete
         }
     }
 
@@ -167,6 +180,10 @@ final class ScreenStreamer {
             configuration.showsCursor = false
             configuration.queueDepth = 5
             configuration.scalesToFit = false
+            // The default leaves the resolution to the system. Ask for the
+            // display's own pixels, so the sharp edge of the picture is as
+            // sharp as the screen.
+            configuration.captureResolution = .best
 
             let fresh = SCStream(filter: activeFilter, configuration: configuration, delegate: nil)
             try fresh.addStreamOutput(

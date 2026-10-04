@@ -4,8 +4,6 @@ import simd
 /// Maps framebuffer pixels directly into the padded picture texture.
 struct DepthTextureTransform {
     let matrix: simd_double3x3
-    let heightOffset: Double
-    let heightScale: Double
 
     init(
         screenToPicture: simd_double3x3,
@@ -38,7 +36,5 @@ struct DepthTextureTransform {
         ))
 
         matrix = pictureToTexture * screenToPicture * pixelToScreen
-        heightOffset = (originY + paddedHeight) / screenHeight
-        heightScale = -paddedHeight / screenHeight
     }
 }
