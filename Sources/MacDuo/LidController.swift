@@ -323,6 +323,12 @@ final class LidController: ObservableObject {
             guard let scripted = run.angle(at: CACurrentMediaTime()) else {
                 preview = nil
                 peakAngle = 0
+                // The next reading is the real lid, and the jump to it from
+                // the sweep's last angle would read as a fast close.
+                lastChangedAngle = nil
+                angularVelocity = 0
+                lastClosingTime = -.greatestFiniteMagnitude
+                motionIntent.reset()
                 if isActive { setActive(false) }
                 return
             }
