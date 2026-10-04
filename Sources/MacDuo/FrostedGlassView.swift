@@ -97,6 +97,8 @@ final class FrostedGlassView: NSView {
         let sigmaPerHeight = state.frost * FrostedGlass.gaussianSigmaPerHeight(lift: state.lift)
         // Points of blur radius per point up the glass.
         let radiusPerHeight = sigmaPerHeight * sin(state.lift) / WindowServerBlur.sigmaPerRadius
+        // Past half the glass's height a blur is a wash of colour whatever
+        // its radius, and a wider one only captures more of the screen.
         let planned = bandLayout.bands(
             radiusPerHeight: radiusPerHeight,
             height: height,
