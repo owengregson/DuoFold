@@ -7,6 +7,9 @@ import LidAngleKit
 ///     lidprobe rate       measure how often the hardware value changes
 ///     lidprobe record 60  every read for 60 s, with a wall clock stamp
 ///     lidprobe watch 15   look for the angle rising while the lid closes
+///     lidprobe push 100   pushed readings asked for every 100 ms, for 5 s
+///     lidprobe reset      put the sensor back to pushing once a second, for
+///                         when Mac Duo was killed before it could
 
 let sensor = LidAngleSensor()
 
@@ -88,6 +91,59 @@ case "record":
         usleep(14000)
     }
     print("# reads \(reads), failed reads \(failures)")
+
+case "push":
+    let milliseconds = Double(CommandLine.arguments.dropFirst(2).first ?? "100") ?? 100
+    // The interval outlives this process, so an interrupt still restores it.
+    var interrupts: [DispatchSourceSignal] = []
+    for number in [SIGINT, SIGTERM, SIGHUP] {
+        signal(number, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
+        source.setEventHandler {
+            sensor.stopPushing()
+            exit(1)
+        }
+        source.resume()
+        interrupts.append(source)
+    }
+    let lock = NSLock()
+    var stamps: [(time: Double, degrees: Double)] = []
+    let started = sensor.startPushing(
+        interval: milliseconds / 1000,
+        queue: DispatchQueue(label: "lidprobe.push", qos: .utility)
+    ) { degrees in
+        lock.lock()
+        stamps.append((CFAbsoluteTimeGetCurrent(), degrees))
+        lock.unlock()
+    }
+    guard started else {
+        print("this sensor cannot be told how often to push; Mac Duo polls it instead")
+        exit(1)
+    }
+    print("asked for a reading every \(Int(milliseconds)) ms, listening for 5 s")
+    RunLoop.main.run(until: Date().addingTimeInterval(5))
+    sensor.stopPushing()
+    lock.lock()
+    let received = stamps
+    lock.unlock()
+    var gaps: [Double] = []
+    for index in 1..<max(1, received.count) {
+        gaps.append((received[index].time - received[index - 1].time) * 1000)
+    }
+    print("pushed readings: \(received.count), last \(received.last.map { String(format: "%.0f°", $0.degrees) } ?? "-")")
+    if !gaps.isEmpty {
+        let sorted = gaps.sorted()
+        print(String(format: "gap between readings: median %.1f ms, widest %.1f ms", sorted[sorted.count / 2], sorted[sorted.count - 1]))
+    }
+    print("interval restored to the driver's own once a second")
+
+case "reset":
+    // A sensor that never pushed can still have its interval set.
+    if sensor.setPushInterval(0) {
+        print("the sensor pushes once a second again")
+    } else {
+        print("this sensor has no push interval to reset")
+    }
 
 case "rate":
     print("measuring for 8 s — hold still, sensor noise reveals the refresh rate")
