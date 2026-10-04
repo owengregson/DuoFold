@@ -63,7 +63,7 @@ macOS may require Screen Recording permission again after rebuilding with ad-hoc
 - The effect stops when macOS sleeps as the lid closes.
 - Clicks pass through the effect to the apps underneath.
 - The window server effect relies on private Core Animation classes. If a macOS release removes them, the app captures the screen instead.
-- The lid sensor's report rate is shared by the whole system and outlives the app. Mac Duo puts it back when it quits, but not when it is force quit; running Mac Duo again, or `build/lidprobe reset`, restores it.
+- The lid sensor's report rate is shared by the whole system and outlives the app. Mac Duo puts it back whenever it quits or the Mac sleeps, but cannot when it is force quit; `build/lidprobe reset` puts it back then, as does the next normal quit.
 
 ## Acknowledgements
 
