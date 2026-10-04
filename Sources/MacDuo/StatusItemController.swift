@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// The menu bar item and the settings popover.
@@ -9,7 +10,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let popover = NSPopover()
     private let preferences: Preferences
     private let controller: LidController
-    private var titleTimer: Timer?
+    private var titleSubscription: AnyCancellable?
     private var barWindowMoved: NSObjectProtocol?
 
     init(controller: LidController, preferences: Preferences) {
@@ -43,17 +44,23 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         hostingController.sizingOptions = [.preferredContentSize]
         popover.contentViewController = hostingController
 
-        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshTitle() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        titleTimer = timer
+        // Only when the shown angle or the setting changes, never on a timer:
+        // a still lid then wakes nothing. Published values arrive before
+        // they are stored, so the title is drawn on the next turn.
+        titleSubscription = controller.$currentAngle
+            // The same rounding as the title itself.
+            .map { String(format: "%.0f", $0) }
+            .removeDuplicates()
+            .combineLatest(preferences.$showsAngleInMenuBar.removeDuplicates())
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshTitle() }
+            }
         refreshTitle()
         watchBarWindow()
     }
 
     deinit {
-        titleTimer?.invalidate()
         if let barWindowMoved {
             NotificationCenter.default.removeObserver(barWindowMoved)
         }
@@ -106,5 +113,15 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         } else if !button.title.isEmpty {
             button.title = ""
         }
+    }
+
+    // The panel shows the live angle, which needs the sensor read while it
+    // is open.
+    func popoverWillShow(_ notification: Notification) {
+        controller.isPanelOpen = true
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        controller.isPanelOpen = false
     }
 }
