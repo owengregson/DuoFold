@@ -18,12 +18,13 @@ final class Preferences: ObservableObject {
         static let blurEvenness = "blurEvenness"
         static let dimReach = "dimReach"
         static let showsAngleInMenuBar = "showsAngleInMenuBar"
+        static let showsMenuBarIcon = "showsMenuBarIcon"
         static let isLivePicture = "isLivePicture"
 
         static let all = [
             isEnabled, isTimeoutEnabled, thresholdAngle, blurSpan, maxBlurRadius,
             maxDim, viewingDistance, recession, blurEvenness, dimReach,
-            showsAngleInMenuBar, isLivePicture,
+            showsAngleInMenuBar, showsMenuBarIcon, isLivePicture,
         ]
     }
 
@@ -39,6 +40,7 @@ final class Preferences: ObservableObject {
         Key.blurEvenness: 0.0,
         Key.dimReach: 0.5,
         Key.showsAngleInMenuBar: false,
+        Key.showsMenuBarIcon: true,
         Key.isLivePicture: true,
     ]
 
@@ -102,6 +104,12 @@ final class Preferences: ObservableObject {
     /// Draw the live angle next to the menu bar icon.
     @Published var showsAngleInMenuBar: Bool {
         didSet { defaults.set(showsAngleInMenuBar, forKey: Key.showsAngleInMenuBar) }
+    }
+
+    /// Keep the icon in the menu bar. Without it, opening the app again is
+    /// the way into the settings.
+    @Published var showsMenuBarIcon: Bool {
+        didSet { defaults.set(showsMenuBarIcon, forKey: Key.showsMenuBarIcon) }
     }
 
     /// Keep the picture under the effect updating, instead of holding the one
@@ -188,6 +196,7 @@ final class Preferences: ObservableObject {
         blurEvenness = defaults.double(forKey: Key.blurEvenness)
         dimReach = defaults.double(forKey: Key.dimReach)
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)
+        showsMenuBarIcon = defaults.bool(forKey: Key.showsMenuBarIcon)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
     }
 
@@ -206,6 +215,7 @@ final class Preferences: ObservableObject {
         blurEvenness = defaults.double(forKey: Key.blurEvenness)
         dimReach = defaults.double(forKey: Key.dimReach)
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)
+        showsMenuBarIcon = defaults.bool(forKey: Key.showsMenuBarIcon)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
     }
 }

@@ -16,6 +16,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.start()
     }
 
+    /// Opening the app while it runs, from Finder, Spotlight or `open`. With
+    /// the menu bar icon hidden, this is the only way back to the settings.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        statusItemController?.showSettings()
+        return false
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         controller?.stop()
     }
