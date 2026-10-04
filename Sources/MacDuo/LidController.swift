@@ -31,6 +31,7 @@ final class LidController: ObservableObject {
     private let sensor = LidAngleSensor()
     private let overlay = DepthOverlay()
     private let streamer = ScreenStreamer()
+    private let escapeKey = EscapeKey()
     private var hinge: LidHingeLimit
 
     private var enabledSubscription: AnyCancellable?
@@ -59,10 +60,9 @@ final class LidController: ObservableObject {
     /// and when. The timeout counts from there.
     private var timeoutReferenceAngle: Double?
     private var timeoutReferenceTime: CFTimeInterval = 0
-    /// Set when the timeout ends the effect, cleared once the lid rises back
-    /// above the threshold. Closing further from the same resting spot must
-    /// not retrigger it.
-    private var timeoutAwaitingRelease = false
+    /// Engaged when the timeout or Escape ends the effect, released once the
+    /// lid rises back above the threshold.
+    private var reopenLatch = LidReopenLatch()
     /// The setting as last seen, so flipping it drops stale tracking.
     private var wasTimeoutEnabled = false
     /// True while `beginClosingOut()` is easing the picture back to flat.
@@ -151,6 +151,7 @@ final class LidController: ObservableObject {
                 guard !enabled else { return }
                 self?.disableEffect()
             }
+        escapeKey.onPress = { [weak self] in self?.escape() }
     }
 
     // MARK: - Lifecycle
@@ -204,6 +205,7 @@ final class LidController: ObservableObject {
         overlay.discardLive()
         preview = nil
         isActive = false
+        updateEscapeKey()
     }
 
     private func disableEffect() {
@@ -232,6 +234,23 @@ final class LidController: ObservableObject {
             shut: max(threshold - preferences.blurSpan * 1.15, 5)
         )
         setPollInterval(Self.activePollInterval)
+    }
+
+    /// Ends the run at once. The settings panel is under the picture, and a
+    /// lid or sensor that will not read back past the start angle would
+    /// otherwise leave only the timeout, which can be off.
+    private func escape() {
+        guard isActive else { return }
+        Diagnostics.lid.notice("end: escape pressed, raw \(self.rawAngle, format: .fixed(precision: 2))")
+        // A preview cut short ends the way a finished one does.
+        if preview != nil {
+            preview = nil
+            peakAngle = 0
+        }
+        reopenLatch.engage()
+        setActive(false)
+        // Escape asks for the screen back now, not after the ease to flat.
+        if isClosingOut { finishClosingOut() }
     }
 
     // MARK: - Polling
@@ -293,6 +312,7 @@ final class LidController: ObservableObject {
             openDwell.update(angle: angle, at: CACurrentMediaTime(), dwellAngle: effectPolicy.dwellAngle)
             reconcile(angle: angle)
         }
+        updateEscapeKey()
 
         let prewarmZone = effectiveThreshold + preferences.prewarmCeiling
         let wantsFastPolling = preferences.isEnabled
@@ -323,6 +343,12 @@ final class LidController: ObservableObject {
         effectPolicy.threshold
     }
 
+    /// Escape belongs to other apps except while a run's picture covers the
+    /// screen. The ease back to flat ends by itself and leaves the key alone.
+    private func updateEscapeKey() {
+        escapeKey.isArmed = isActive && overlay.isRevealed
+    }
+
     /// Whether the picture belongs on screen for this angle. It widens the
     /// angle for release and keeps a lid held below the angle showing, unless
     /// the timeout ends it first.
@@ -332,7 +358,6 @@ final class LidController: ObservableObject {
         guard preferences.isEnabled, builtInLayout.displayID != nil else { return false }
         if preferences.isTimeoutEnabled != wasTimeoutEnabled {
             timeoutReferenceAngle = nil
-            timeoutAwaitingRelease = false
             wasTimeoutEnabled = preferences.isTimeoutEnabled
         }
 
@@ -341,9 +366,8 @@ final class LidController: ObservableObject {
         let threshold = policy.threshold
         let minimumDurationElapsed = now - startedAt > Self.minimumEffectDuration
 
-        if !isActive, preferences.isTimeoutEnabled, timeoutAwaitingRelease {
-            guard angle >= threshold else { return false }
-            timeoutAwaitingRelease = false
+        if !isActive, !reopenLatch.allowsStart(angle: angle, threshold: threshold) {
+            return false
         }
 
         let wanted = policy.wantsEffect(
@@ -365,7 +389,7 @@ final class LidController: ObservableObject {
         // The timeout only cuts short a run the policy would keep showing.
         if isActive, wanted, minimumDurationElapsed,
            preferences.isTimeoutEnabled, isPastTimeout(angle: angle) {
-            timeoutAwaitingRelease = true
+            reopenLatch.engage()
             return false
         }
         return wanted
@@ -504,6 +528,7 @@ final class LidController: ObservableObject {
             timeoutReferenceAngle = nil
             beginClosingOut()
         }
+        updateEscapeKey()
     }
 
     /// Eases the picture back to flat before the overlay fades away. Ending
@@ -750,7 +775,7 @@ final class LidController: ObservableObject {
         openDwell.reset()
         peakAngle = 0
         timeoutReferenceAngle = nil
-        timeoutAwaitingRelease = false
+        reopenLatch.reset()
         wasTimeoutEnabled = false
         isClosingOut = false
         // A reading from before sleep and one after must not make a hold.

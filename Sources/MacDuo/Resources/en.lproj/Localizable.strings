@@ -3,6 +3,7 @@
 "This Mac has no lid angle sensor. Only some MacBook models have one." = "This Mac has no lid angle sensor. Only some MacBook models have one.";
 "Depth effect" = "Depth effect";
 "Leans the screen away as the lid closes." = "Leans the screen away as the lid closes.";
+"Press Esc to end it at once." = "Press Esc to end it at once.";
 "Live rendering" = "Live rendering";
 "Off holds the frame from when the effect started." = "Off holds the frame from when the effect started.";
 "Start" = "Start";

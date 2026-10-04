@@ -3,6 +3,7 @@
 "This Mac has no lid angle sensor. Only some MacBook models have one." = "这台 Mac 没有屏幕开合角度传感器。只有部分 MacBook 机型配备该传感器。";
 "Depth effect" = "景深效果";
 "Leans the screen away as the lid closes." = "合上屏幕时，画面会向后倾斜。";
+"Press Esc to end it at once." = "按 Esc 键可立即结束效果。";
 "Live rendering" = "实时渲染";
 "Off holds the frame from when the effect started." = "关闭后，画面将停留在效果开始时的那一帧。";
 "Start" = "触发设置";

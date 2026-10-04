@@ -91,10 +91,13 @@ struct SettingsView: View {
 
     private var switches: some View {
         VStack(alignment: .leading, spacing: 4) {
+            // Escape only helps someone who knew about it before the picture
+            // covered this panel.
             toggleRow(
                 localized("Depth effect"),
                 isOn: $preferences.isEnabled,
                 help: localized("Leans the screen away as the lid closes.")
+                    + "\n" + localized("Press Esc to end it at once.")
             )
             toggleRow(
                 localized("Live rendering"),

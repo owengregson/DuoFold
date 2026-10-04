@@ -109,6 +109,9 @@ final class DepthOverlay {
     private var hasRevealed = false
 
     var isVisible: Bool { window != nil }
+    /// True once the picture has faded in over the screen. A live window
+    /// waits transparent for its first frame, and that hides nothing.
+    var isRevealed: Bool { window != nil && hasRevealed }
     var isPictureReady: Bool { renderer?.isReady ?? false }
     var hostWindow: NSWindow? { window }
 

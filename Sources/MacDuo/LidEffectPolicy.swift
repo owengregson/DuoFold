@@ -49,6 +49,29 @@ struct LidOpenDwell {
     }
 }
 
+/// Holds off a new run after one was ended early, by the timeout or by
+/// Escape, until the lid has opened back to the start angle. Closing further
+/// from the same resting spot is not a new close.
+struct LidReopenLatch {
+    private(set) var isEngaged = false
+
+    mutating func engage() {
+        isEngaged = true
+    }
+
+    /// Whether a run may start at this angle. Reaching the threshold lets go.
+    mutating func allowsStart(angle: Double, threshold: Double) -> Bool {
+        guard isEngaged else { return true }
+        guard angle >= threshold else { return false }
+        isEngaged = false
+        return true
+    }
+
+    mutating func reset() {
+        isEngaged = false
+    }
+}
+
 /// How far this lid opens, learned from the widest angle it has been held
 /// at. Hinges stop a few degrees either side of 130°, so a start angle near
 /// the top of the slider can leave the release angle out of reach.

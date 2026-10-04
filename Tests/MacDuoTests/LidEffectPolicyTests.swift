@@ -124,6 +124,34 @@ struct LidEffectPolicyTests {
         #expect(!activeEffect(angle: 130, opening: false, dwelled: true, rise: 1))
     }
 
+    @Test
+    func testReopenLatchHoldsOffUntilTheLidReopens() {
+        var latch = LidReopenLatch()
+        let unengaged = latch.allowsStart(angle: 60, threshold: 128)
+        #expect(unengaged)
+
+        // Ended early at 100°. Closing further is not a new close.
+        latch.engage()
+        let closingFurther = [100, 60, 127.9].map { latch.allowsStart(angle: $0, threshold: 128) }
+        #expect(closingFurther == [false, false, false])
+        #expect(latch.isEngaged)
+
+        // Back at the start angle, and later closes count again.
+        let reopened = [128, 60].map { latch.allowsStart(angle: $0, threshold: 128) }
+        #expect(reopened == [true, true])
+        #expect(!latch.isEngaged)
+    }
+
+    @Test
+    func testResetLetsGoOfTheReopenLatch() {
+        var latch = LidReopenLatch()
+        latch.engage()
+        latch.reset()
+        #expect(!latch.isEngaged)
+        let allowed = latch.allowsStart(angle: 60, threshold: 128)
+        #expect(allowed)
+    }
+
     private func activeEffect(
         angle: Double,
         opening: Bool,
