@@ -317,7 +317,10 @@ final class DepthOverlay {
         window.ignoresMouseEvents = true
         window.isReleasedWhenClosed = false
         window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
-        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        // On every space, full screen ones too, and floating above them while
+        // they slide. `.stationary` keeps a window still like the desktop,
+        // which slides away with its space on a swipe between spaces.
+        window.collectionBehavior = [.canJoinAllSpaces, .transient, .fullScreenAuxiliary, .ignoresCycle]
         window.setFrame(screen.frame, display: false)
         return window
     }
