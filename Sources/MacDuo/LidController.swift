@@ -62,7 +62,9 @@ final class LidController: ObservableObject {
     private var lastChangedAngle: Double?
     private var lastChangeTime: CFTimeInterval = 0
     private var lastClosingTime: CFTimeInterval = -.greatestFiniteMagnitude
-    private var visualAngle = CriticallyDampedSpring()
+    /// Following a steady close, a spring trails it by 2 / frequency seconds.
+    /// At 24 that is about the lead `visualTarget` gives a fast close.
+    private var visualAngle = CriticallyDampedSpring(frequency: 24)
     private var consecutiveFailedReads = 0
     private var startedAt: CFTimeInterval = 0
     private var preview: PreviewRun?
@@ -113,6 +115,10 @@ final class LidController: ObservableObject {
 
     /// Sensor latency the prediction adds on top of the reading's own age.
     private static let predictionLatency: TimeInterval = 0.04
+
+    /// A closing lid changes its reading at every sensor refresh, about every
+    /// 100 ms. Longer without one and it has stopped.
+    private static let predictionFreshness: TimeInterval = 0.15
 
     /// The ordinary hysteresis release waits this long. A prediction can fire
     /// while the last reading is still above the trigger angle, but deliberate
@@ -605,6 +611,16 @@ final class LidController: ObservableObject {
         return rawAngle + angularVelocity * (staleness + Self.predictionLatency)
     }
 
+    /// Where the picture heads. While a fast close keeps changing the reading,
+    /// that is where the lid is heading rather than where it last read. Once
+    /// the readings stop changing the lid has stopped too, and the picture
+    /// settles on the last one instead of carrying on past it until the speed
+    /// decays.
+    private func visualTarget() -> Double {
+        guard isActive, CACurrentMediaTime() - lastChangeTime < Self.predictionFreshness else { return rawAngle }
+        return predictedAngle()
+    }
+
     private func publish(angle: Double) {
         let now = CACurrentMediaTime()
         guard now - lastPublishTime > 0.08 else { return }
@@ -793,7 +809,7 @@ final class LidController: ObservableObject {
         if let frame = streamer.newFrame() {
             overlay.absorb(frame)
         }
-        let target = isClosingOut ? preferences.thresholdAngle : rawAngle
+        let target = isClosingOut ? preferences.thresholdAngle : visualTarget()
         visualAngle.advance(to: target, dt: dt)
 
         guard isClosingOut else {
