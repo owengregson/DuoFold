@@ -29,7 +29,7 @@ final class Preferences: ObservableObject {
 
     private static let factory: [String: Any] = [
         Key.isEnabled: true,
-        Key.isTimeoutEnabled: false,
+        Key.isTimeoutEnabled: true,
         Key.thresholdAngle: 90.0,
         Key.blurSpan: 60.0,
         Key.maxBlurRadius: 135.0,
@@ -48,7 +48,9 @@ final class Preferences: ObservableObject {
     }
 
     /// Ends the effect early if the angle holds still while below the
-    /// threshold, instead of waiting for the lid to open back past it.
+    /// threshold, instead of waiting for the lid to open back past it. On by
+    /// default, as the one release that asks nothing of the hinge. A saved
+    /// value outranks the registered default, so an existing choice stands.
     @Published var isTimeoutEnabled: Bool {
         didSet { defaults.set(isTimeoutEnabled, forKey: Key.isTimeoutEnabled) }
     }
@@ -128,6 +130,39 @@ final class Preferences: ObservableObject {
 
     /// Degrees above the threshold before the overlay is released.
     let hysteresis: Double = 4
+
+    /// The widest angle this Mac's lid has been held at, which keeps the start
+    /// angle low enough to release. A measurement rather than a setting, so
+    /// Reset keeps it. Stored for this Mac only, so that a home folder moved
+    /// to another MacBook does not bring the old hinge along. Forget it with
+    /// `defaults -currentHost delete to.maki.MacDuo hingeLimit`.
+    var hingeLimit: Double? {
+        get {
+            let value = CFPreferencesCopyValue(
+                Self.hingeLimitKey,
+                kCFPreferencesCurrentApplication,
+                kCFPreferencesCurrentUser,
+                kCFPreferencesCurrentHost
+            )
+            return (value as? NSNumber)?.doubleValue
+        }
+        set {
+            CFPreferencesSetValue(
+                Self.hingeLimitKey,
+                newValue.map { $0 as NSNumber },
+                kCFPreferencesCurrentApplication,
+                kCFPreferencesCurrentUser,
+                kCFPreferencesCurrentHost
+            )
+            CFPreferencesSynchronize(
+                kCFPreferencesCurrentApplication,
+                kCFPreferencesCurrentUser,
+                kCFPreferencesCurrentHost
+            )
+        }
+    }
+
+    private static let hingeLimitKey = "hingeLimit" as CFString
 
     /// Settings from earlier versions, removed at launch.
     private static let retired = [

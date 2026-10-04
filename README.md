@@ -60,7 +60,7 @@ macOS may require Screen Recording permission again after rebuilding with ad-hoc
 - The sensor must be one macOS marks as built-in. An external display with a similar sensor is ignored.
 - The effect applies only to the built-in display.
 - The effect stops when macOS sleeps as the lid closes.
-- Clicks pass through the effect to the apps underneath.
+- Clicks pass through the effect to the apps underneath. Press Escape to end the effect at once; Mac Duo only takes the key while the effect covers the screen.
 
 ## Acknowledgements
 

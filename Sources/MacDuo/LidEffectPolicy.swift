@@ -49,9 +49,106 @@ struct LidOpenDwell {
     }
 }
 
+/// Holds off a new run after one was ended early, by the timeout or by
+/// Escape, until the lid has opened back to the start angle. Closing further
+/// from the same resting spot is not a new close.
+struct LidReopenLatch {
+    private(set) var isEngaged = false
+
+    mutating func engage() {
+        isEngaged = true
+    }
+
+    /// Whether a run may start at this angle. Reaching the threshold lets go.
+    mutating func allowsStart(angle: Double, threshold: Double) -> Bool {
+        guard isEngaged else { return true }
+        guard angle >= threshold else { return false }
+        isEngaged = false
+        return true
+    }
+
+    mutating func reset() {
+        isEngaged = false
+    }
+}
+
+/// How far this lid opens, learned from the widest angle it has been held
+/// at. Hinges stop a few degrees either side of 130°, so a start angle near
+/// the top of the slider can leave the release angle out of reach.
+struct LidHingeLimit {
+    /// Readings within this many degrees of the first count as one hold. A
+    /// whole-degree sensor resting on a half-degree boundary alternates
+    /// between two readings a degree apart.
+    static let holdTolerance: Double = 1
+
+    /// How long a hold must last before it counts, so one stray reading
+    /// cannot raise the limit.
+    static let holdDuration: TimeInterval = 1
+
+    /// No hinge opens past flat. A reading outside this is a sensor fault.
+    static let plausibleAngles: ClosedRange<Double> = 0...180
+
+    /// The widest angle held so far, `nil` before the first hold. It only
+    /// rises: a lid resting lower has not found a new hinge stop.
+    private(set) var angle: Double?
+
+    private var holdAnchor: Double?
+    private var holdFloor: Double = 0
+    private var holdStart: TimeInterval = 0
+
+    init(angle: Double? = nil) {
+        if let angle, Self.plausibleAngles.contains(angle) {
+            self.angle = angle
+        }
+    }
+
+    /// Returns true when the reading raised the limit.
+    @discardableResult
+    mutating func observe(_ reading: Double, at now: TimeInterval) -> Bool {
+        guard Self.plausibleAngles.contains(reading) else {
+            holdAnchor = nil
+            return false
+        }
+        guard let anchor = holdAnchor, abs(reading - anchor) <= Self.holdTolerance else {
+            holdAnchor = reading
+            holdFloor = reading
+            holdStart = now
+            return false
+        }
+        // The lowest reading of the hold, so a lid resting between two
+        // readings counts as the lower one.
+        holdFloor = min(holdFloor, reading)
+        guard now - holdStart >= Self.holdDuration, holdFloor > (angle ?? -.infinity) else {
+            return false
+        }
+        angle = holdFloor
+        return true
+    }
+
+    /// Drops the hold in progress, for a gap in the readings such as sleep.
+    mutating func interrupt() {
+        holdAnchor = nil
+    }
+}
+
 struct LidEffectPolicy {
     let threshold: Double
     let hysteresis: Double
+
+    init(threshold: Double, hysteresis: Double) {
+        self.threshold = threshold
+        self.hysteresis = hysteresis
+    }
+
+    /// The configured start angle, lowered where needed so that the lid at
+    /// `hingeLimit` reaches `threshold + hysteresis`. Every release rule then
+    /// has a lid position that satisfies it, and the opening and dwell rules,
+    /// which need only the threshold, keep `hysteresis` of margin should the
+    /// limit sit a little high. Before the limit is known the setting stands.
+    init(threshold: Double, hysteresis: Double, hingeLimit: Double?) {
+        let reachable = hingeLimit.map { $0 - hysteresis } ?? .infinity
+        self.init(threshold: min(threshold, reachable), hysteresis: hysteresis)
+    }
 
     /// A lid held at or above this angle has been opened again, even when
     /// threshold + hysteresis is past what the hinge can reach. The threshold

@@ -21,6 +21,9 @@ final class LidController: ObservableObject {
     @Published private(set) var currentAngle: Double = 0
     @Published private(set) var isSensorAvailable = false
     @Published private(set) var isActive = false
+    /// `hinge.angle`, published for the settings panel. `hinge` itself
+    /// changes on every reading.
+    @Published private(set) var hingeLimit: Double?
 
     let snapshotter = ScreenSnapshotter()
 
@@ -28,6 +31,8 @@ final class LidController: ObservableObject {
     private let sensor = LidAngleSensor()
     private let overlay = DepthOverlay()
     private let streamer = ScreenStreamer()
+    private let escapeKey = EscapeKey()
+    private var hinge: LidHingeLimit
 
     private var enabledSubscription: AnyCancellable?
     private var pictureTask: Task<Void, Never>?
@@ -55,10 +60,9 @@ final class LidController: ObservableObject {
     /// and when. The timeout counts from there.
     private var timeoutReferenceAngle: Double?
     private var timeoutReferenceTime: CFTimeInterval = 0
-    /// Set when the timeout ends the effect, cleared once the lid rises back
-    /// above the threshold. Closing further from the same resting spot must
-    /// not retrigger it.
-    private var timeoutAwaitingRelease = false
+    /// Engaged when the timeout or Escape ends the effect, released once the
+    /// lid rises back above the threshold.
+    private var reopenLatch = LidReopenLatch()
     /// The setting as last seen, so flipping it drops stale tracking.
     private var wasTimeoutEnabled = false
     /// True while `beginClosingOut()` is easing the picture back to flat.
@@ -139,12 +143,15 @@ final class LidController: ObservableObject {
 
     init(preferences: Preferences) {
         self.preferences = preferences
+        hinge = LidHingeLimit(angle: preferences.hingeLimit)
+        hingeLimit = hinge.angle
         enabledSubscription = preferences.$isEnabled
             .removeDuplicates()
             .sink { [weak self] enabled in
                 guard !enabled else { return }
                 self?.disableEffect()
             }
+        escapeKey.onPress = { [weak self] in self?.escape() }
     }
 
     // MARK: - Lifecycle
@@ -198,6 +205,7 @@ final class LidController: ObservableObject {
         overlay.discardLive()
         preview = nil
         isActive = false
+        updateEscapeKey()
     }
 
     private func disableEffect() {
@@ -216,15 +224,33 @@ final class LidController: ObservableObject {
         guard preferences.isEnabled, !isSuspended, preview == nil, !isActive else { return }
         // Well above the trigger angle, so the sweep runs the pre-warm the way
         // a real close does.
+        let threshold = effectiveThreshold
         preview = PreviewRun(
             startedAt: CACurrentMediaTime(),
             open: max(
-                preferences.thresholdAngle + preferences.hysteresis + 5,
-                min(preferences.thresholdAngle + 35, 130)
+                threshold + preferences.hysteresis + 5,
+                min(threshold + 35, 130)
             ),
-            shut: max(preferences.thresholdAngle - preferences.blurSpan * 1.15, 5)
+            shut: max(threshold - preferences.blurSpan * 1.15, 5)
         )
         setPollInterval(Self.activePollInterval)
+    }
+
+    /// Ends the run at once. The settings panel is under the picture, and a
+    /// lid or sensor that will not read back past the start angle would
+    /// otherwise leave only the timeout, which can be off.
+    private func escape() {
+        guard isActive else { return }
+        Diagnostics.lid.notice("end: escape pressed, raw \(self.rawAngle, format: .fixed(precision: 2))")
+        // A preview cut short ends the way a finished one does.
+        if preview != nil {
+            preview = nil
+            peakAngle = 0
+        }
+        reopenLatch.engage()
+        setActive(false)
+        // Escape asks for the screen back now, not after the ease to flat.
+        if isClosingOut { finishClosingOut() }
     }
 
     // MARK: - Polling
@@ -273,6 +299,7 @@ final class LidController: ObservableObject {
             }
             consecutiveFailedReads = 0
             angle = read
+            learnHinge(from: read)
         }
 
         rawAngle = angle
@@ -285,15 +312,41 @@ final class LidController: ObservableObject {
             openDwell.update(angle: angle, at: CACurrentMediaTime(), dwellAngle: effectPolicy.dwellAngle)
             reconcile(angle: angle)
         }
+        updateEscapeKey()
 
-        let prewarmZone = preferences.thresholdAngle + preferences.prewarmCeiling
+        let prewarmZone = effectiveThreshold + preferences.prewarmCeiling
         let wantsFastPolling = preferences.isEnabled
             && (preview != nil || isActive || angle <= prewarmZone + Self.fastPollMargin)
         setPollInterval(wantsFastPolling ? Self.activePollInterval : Self.idlePollInterval)
     }
 
+    /// Only sensor readings count. The preview sweeps past where any hinge
+    /// stops.
+    private func learnHinge(from reading: Double) {
+        guard hinge.observe(reading, at: CACurrentMediaTime()), let limit = hinge.angle else { return }
+        hingeLimit = limit
+        preferences.hingeLimit = limit
+        Diagnostics.lid.notice("hinge limit now \(limit, format: .fixed(precision: 2))")
+    }
+
     private var effectPolicy: LidEffectPolicy {
-        LidEffectPolicy(threshold: preferences.thresholdAngle, hysteresis: preferences.hysteresis)
+        LidEffectPolicy(
+            threshold: preferences.thresholdAngle,
+            hysteresis: preferences.hysteresis,
+            hingeLimit: hingeLimit
+        )
+    }
+
+    /// The start angle in force: the setting, unless the lid does not open far
+    /// enough past it for the effect to be released.
+    var effectiveThreshold: Double {
+        effectPolicy.threshold
+    }
+
+    /// Escape belongs to other apps except while a run's picture covers the
+    /// screen. The ease back to flat ends by itself and leaves the key alone.
+    private func updateEscapeKey() {
+        escapeKey.isArmed = isActive && overlay.isRevealed
     }
 
     /// Whether the picture belongs on screen for this angle. It widens the
@@ -305,20 +358,19 @@ final class LidController: ObservableObject {
         guard preferences.isEnabled, builtInLayout.displayID != nil else { return false }
         if preferences.isTimeoutEnabled != wasTimeoutEnabled {
             timeoutReferenceAngle = nil
-            timeoutAwaitingRelease = false
             wasTimeoutEnabled = preferences.isTimeoutEnabled
         }
 
         let now = CACurrentMediaTime()
-        let threshold = preferences.thresholdAngle
+        let policy = effectPolicy
+        let threshold = policy.threshold
         let minimumDurationElapsed = now - startedAt > Self.minimumEffectDuration
 
-        if !isActive, preferences.isTimeoutEnabled, timeoutAwaitingRelease {
-            guard angle >= threshold else { return false }
-            timeoutAwaitingRelease = false
+        if !isActive, !reopenLatch.allowsStart(angle: angle, threshold: threshold) {
+            return false
         }
 
-        let wanted = effectPolicy.wantsEffect(
+        let wanted = policy.wantsEffect(
             isEnabled: preferences.isEnabled,
             isActive: isActive,
             angle: angle,
@@ -337,7 +389,7 @@ final class LidController: ObservableObject {
         // The timeout only cuts short a run the policy would keep showing.
         if isActive, wanted, minimumDurationElapsed,
            preferences.isTimeoutEnabled, isPastTimeout(angle: angle) {
-            timeoutAwaitingRelease = true
+            reopenLatch.engage()
             return false
         }
         return wanted
@@ -381,7 +433,7 @@ final class LidController: ObservableObject {
         } else if !isClosingOut {
             // The ease back to flat still draws the live picture, and this
             // would free it.
-            updatePrewarm(angle: angle, ceiling: preferences.thresholdAngle + preferences.prewarmCeiling)
+            updatePrewarm(angle: angle, ceiling: effectiveThreshold + preferences.prewarmCeiling)
         }
     }
 
@@ -476,6 +528,7 @@ final class LidController: ObservableObject {
             timeoutReferenceAngle = nil
             beginClosingOut()
         }
+        updateEscapeKey()
     }
 
     /// Eases the picture back to flat before the overlay fades away. Ending
@@ -509,7 +562,7 @@ final class LidController: ObservableObject {
         if preferences.isLivePicture, let screen = NSScreen.builtIn,
            overlay.showLive(
                on: screen,
-               startAngle: preferences.thresholdAngle,
+               startAngle: effectiveThreshold,
                tuning: tuning,
                fadeIn: Self.fadeInDuration
            ) {
@@ -585,7 +638,7 @@ final class LidController: ObservableObject {
         overlay.show(
             image: image,
             on: screen,
-            startAngle: preferences.thresholdAngle,
+            startAngle: effectiveThreshold,
             tuning: tuning,
             fadeIn: Self.fadeInDuration
         )
@@ -595,7 +648,7 @@ final class LidController: ObservableObject {
 
     private func blurProgress(for angle: Double) -> Double {
         let span = max(preferences.blurSpan, 1)
-        return min(max((preferences.thresholdAngle - angle) / span, 0), 1)
+        return min(max((effectiveThreshold - angle) / span, 0), 1)
     }
 
     // MARK: - Animation
@@ -626,7 +679,7 @@ final class LidController: ObservableObject {
         if let frame = streamer.newFrame() {
             overlay.absorb(frame)
         }
-        let target = isClosingOut ? preferences.thresholdAngle : rawAngle
+        let target = isClosingOut ? effectiveThreshold : rawAngle
         visualAngle.advance(to: target, dt: dt)
 
         guard isClosingOut else {
@@ -722,9 +775,11 @@ final class LidController: ObservableObject {
         openDwell.reset()
         peakAngle = 0
         timeoutReferenceAngle = nil
-        timeoutAwaitingRelease = false
+        reopenLatch.reset()
         wasTimeoutEnabled = false
         isClosingOut = false
+        // A reading from before sleep and one after must not make a hold.
+        hinge.interrupt()
         if let angle = sensor.angle() {
             rawAngle = angle
             visualAngle.reset(to: angle)

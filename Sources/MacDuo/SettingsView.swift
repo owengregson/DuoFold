@@ -91,10 +91,13 @@ struct SettingsView: View {
 
     private var switches: some View {
         VStack(alignment: .leading, spacing: 4) {
+            // Escape only helps someone who knew about it before the picture
+            // covered this panel.
             toggleRow(
                 localized("Depth effect"),
                 isOn: $preferences.isEnabled,
                 help: localized("Leans the screen away as the lid closes.")
+                    + "\n" + localized("Press Esc to end it at once.")
             )
             toggleRow(
                 localized("Live rendering"),
@@ -114,13 +117,23 @@ struct SettingsView: View {
             )
             slider(
                 localized("Start angle"), value: $preferences.thresholdAngle, in: 5...130, format: "%.0f°",
-                help: localized("The effect starts at this angle.")
+                help: startAngleHelp
             )
             slider(
                 localized("Full effect after"), value: $preferences.blurSpan, in: 5...60, format: "%.0f°",
                 help: localized("Degrees of further closing to reach full strength.")
             )
         }
+    }
+
+    /// Names the angle in force when the hinge holds the setting down. The
+    /// slider keeps the setting, which applies again on a lid that opens wider.
+    private var startAngleHelp: String {
+        let help = localized("The effect starts at this angle.")
+        let effective = controller.effectiveThreshold
+        guard effective.rounded() < preferences.thresholdAngle.rounded() else { return help }
+        let lowered = String(format: localized("Lowered to %.0f° so opening the lid fully still ends the effect."), effective)
+        return help + "\n" + lowered
     }
 
     private var lookGroup: some View {
