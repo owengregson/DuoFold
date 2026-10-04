@@ -29,6 +29,24 @@ final class LidController: ObservableObject {
     private let overlay = DepthOverlay()
     private let streamer = ScreenStreamer()
 
+    /// Keeps the sensor read on every poll while the settings panel shows
+    /// the live angle.
+    var isPanelOpen = false {
+        didSet { if isPanelOpen { wake() } }
+    }
+
+    /// Pushed readings land on a utility queue and only wake the main
+    /// thread when the lid moves.
+    private lazy var pushWatch = LidPushWatch { [weak self] wake in
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { self?.wake(from: wake) }
+        }
+    }
+    private let wakePolicy = LidWakePolicy()
+    private var pushInterval: TimeInterval = 0
+    private var lastMovementAngle: Double = 0
+    private var lastMovementTime: CFTimeInterval = 0
+
     private var enabledSubscription: AnyCancellable?
     private var captureSubscription: AnyCancellable?
     private var pictureTask: Task<Void, Never>?
@@ -76,6 +94,10 @@ final class LidController: ObservableObject {
     private static let fadeInDuration: TimeInterval = 0.07
     /// Degrees above the pre-warm zone at which polling speeds up.
     private static let fastPollMargin: Double = 20
+
+    /// A change this large counts as the lid moving, for how long polling
+    /// carries on before waiting for pushed readings.
+    private static let movementThreshold: Double = 0.3
 
     /// Closing speed that counts as a deliberate close, in degrees per second.
     /// A still lid reads under 0.5.
@@ -175,6 +197,9 @@ final class LidController: ObservableObject {
         }
         // Before the first poll, which reads it.
         builtInLayout = Layout(displayID: NSScreen.builtIn?.displayID, frame: NSScreen.builtIn?.frame)
+        pushInterval = LidWakePolicy.nearPushInterval
+        let pushes = pushWatch.start(sensor, interval: pushInterval)
+        Diagnostics.lid.notice("sensor pushes readings: \(pushes)")
         setPollInterval(Self.idlePollInterval)
         observeSystemEvents()
         DistributedNotificationCenter.default().addObserver(
@@ -226,6 +251,8 @@ final class LidController: ObservableObject {
         pollTimer = nil
         pollInterval = 0
         stopEffectAndCapture()
+        // The report interval outlives this process.
+        pushWatch.stop(sensor)
     }
 
     private func stopEffectAndCapture() {
@@ -266,7 +293,7 @@ final class LidController: ObservableObject {
             ),
             shut: max(preferences.thresholdAngle - preferences.blurSpan * 1.15, 5)
         )
-        setPollInterval(Self.activePollInterval)
+        wake()
     }
 
     // MARK: - Polling
@@ -328,10 +355,99 @@ final class LidController: ObservableObject {
             reconcile(angle: angle)
         }
 
+        schedulePolling(angle: angle)
+    }
+
+    /// Polls while anything needs fresh angles, and otherwise sleeps until a
+    /// pushed reading shows the lid moving. A sensor that cannot push, or
+    /// whose readings stopped, is polled as before.
+    private func schedulePolling(angle: Double) {
+        let now = CACurrentMediaTime()
+        if abs(angle - lastMovementAngle) >= Self.movementThreshold {
+            lastMovementAngle = angle
+            lastMovementTime = now
+        }
+        // Only the display link finishes the ease back to flat, and a link
+        // whose window lost its screen stops firing.
+        if isClosingOut, now - closingOutStartedAt > 2 * Self.closingOutMaxDuration {
+            Diagnostics.lid.notice("closing out never settled, finishing it")
+            finishClosingOut()
+        }
+        let needsAngles = wakePolicy.needsFreshAngles(
+            isPreviewing: preview != nil,
+            isClosingOut: isClosingOut,
+            isPanelOpen: isPanelOpen,
+            isCapturePending: isCapturePending,
+            isActive: isActive,
+            capturesScreen: capturesScreen,
+            isTimeoutEnabled: preferences.isTimeoutEnabled,
+            isPictureSettled: abs(visualAngle.value - rawAngle) < 0.01 && abs(visualAngle.velocity) < 0.05,
+            sinceMovement: now - lastMovementTime
+        )
+        if !needsAngles, pushWatch.isLive {
+            sleep(at: angle)
+            return
+        }
         let prewarmZone = preferences.thresholdAngle + preferences.prewarmCeiling
         let wantsFastPolling = preferences.isEnabled
             && (preview != nil || isActive || angle <= prewarmZone + Self.fastPollMargin)
         setPollInterval(wantsFastPolling ? Self.activePollInterval : Self.idlePollInterval)
+    }
+
+    /// Stops polling until a pushed reading shows the lid moving.
+    private func sleep(at angle: Double) {
+        pollTimer?.invalidate()
+        pollTimer = nil
+        pollInterval = 0
+        // A still picture needs no frames: the window server keeps the glass
+        // live. A wake restarts the link through `reconcile`.
+        stopDisplayLink()
+        pushWatch.sleep(at: angle)
+        let interval = wakePolicy.pushInterval(
+            angle: angle,
+            threshold: preferences.thresholdAngle,
+            isEnabled: preferences.isEnabled
+        )
+        if interval != pushInterval {
+            pushInterval = interval
+            pushWatch.setInterval(interval, on: sensor)
+        }
+    }
+
+    /// Starts polling again, from sleep or not.
+    private func wake() {
+        guard isSensorAvailable, !isSuspended else { return }
+        pushWatch.wake()
+        lastMovementTime = CACurrentMediaTime()
+        setPollInterval(Self.activePollInterval)
+    }
+
+    private func wake(from push: LidPushWatch.Wake) {
+        guard !isSuspended else { return }
+        switch push {
+        case .moved(let speed):
+            // Act on this reading rather than a poll later, starting from the
+            // speed the pushes measured: one reading cannot measure one.
+            let now = CACurrentMediaTime()
+            if abs(speed) > abs(angularVelocity) {
+                angularVelocity = speed
+                motionIntent.update(
+                    angularVelocity: speed,
+                    at: now,
+                    closingSpeed: Self.triggerClosingSpeed,
+                    openingSpeed: Self.triggerOpeningSpeed
+                )
+                if speed <= -preferences.closingSpeed { lastClosingTime = now }
+            }
+            // The reading before the sleep is too old to measure against.
+            lastChangedAngle = nil
+            wake()
+            poll()
+        case .silent:
+            Diagnostics.lid.notice("pushed readings stopped, polling until they return")
+            pushWatch.setInterval(pushInterval, on: sensor)
+            wake()
+        }
     }
 
     private var effectPolicy: LidEffectPolicy {
@@ -765,6 +881,7 @@ final class LidController: ObservableObject {
         Diagnostics.lid.notice("suspend")
         isSuspended = true
         stopEffectAndCapture()
+        pushWatch.pause(sensor)
     }
 
     private func resume() {
@@ -786,6 +903,10 @@ final class LidController: ObservableObject {
             rawAngle = angle
             visualAngle.reset(to: angle)
         }
-        setPollInterval(Self.idlePollInterval)
+        if sensor.isPushing {
+            pushInterval = LidWakePolicy.nearPushInterval
+            pushWatch.setInterval(pushInterval, on: sensor)
+        }
+        wake()
     }
 }

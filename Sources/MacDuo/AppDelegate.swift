@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.controller = controller
         statusItemController = StatusItemController(controller: controller, preferences: preferences)
         controller.start()
+        TerminationSignals.routeToTerminate()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
