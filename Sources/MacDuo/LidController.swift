@@ -30,6 +30,7 @@ final class LidController: ObservableObject {
     private let streamer = ScreenStreamer()
 
     private var enabledSubscription: AnyCancellable?
+    private var captureSubscription: AnyCancellable?
     private var pictureTask: Task<Void, Never>?
     private var pollTimer: Timer?
     private var pollInterval: TimeInterval = 0
@@ -145,6 +146,20 @@ final class LidController: ObservableObject {
                 guard !enabled else { return }
                 self?.disableEffect()
             }
+        captureSubscription = preferences.$capturesScreen
+            .removeDuplicates()
+            .dropFirst()
+            // After the change lands: the publisher fires before it does.
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.switchRendering() }
+            }
+    }
+
+    /// True when the effect is drawn from a screen capture: when the setting
+    /// asks for it, or when the window server cannot draw the glass.
+    var capturesScreen: Bool {
+        preferences.capturesScreen || !WindowServerBlur.isAvailable
     }
 
     // MARK: - Lifecycle
@@ -169,6 +184,16 @@ final class LidController: ObservableObject {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.runPreview() }
         }
+        // The glass captures nothing, so it never touches ScreenCaptureKit
+        // and never asks for Screen Recording.
+        if capturesScreen {
+            warmCapture()
+        } else {
+            prepareGlass()
+        }
+    }
+
+    private func warmCapture() {
         overlay.warmUp()
         Task {
             await snapshotter.warmFilter()
@@ -176,6 +201,23 @@ final class LidController: ObservableObject {
             // can name this app and leave the overlay out of the picture.
             try? await Task.sleep(nanoseconds: 500_000_000)
             await streamer.warmFilter()
+        }
+    }
+
+    /// Has the glass built and waiting, hidden, for the next close.
+    private func prepareGlass() {
+        guard !capturesScreen, let screen = NSScreen.builtIn else { return }
+        overlay.prepareGlass(on: screen)
+    }
+
+    private func switchRendering() {
+        Diagnostics.lid.notice("rendering switched, captures screen: \(self.capturesScreen)")
+        stopEffectAndCapture()
+        guard isSensorAvailable else { return }
+        if capturesScreen {
+            warmCapture()
+        } else {
+            prepareGlass()
         }
     }
 
@@ -374,7 +416,7 @@ final class LidController: ObservableObject {
             return
         }
         if isActive {
-            if preferences.isLivePicture { streamer.start() }
+            if capturesScreen, preferences.isLivePicture { streamer.start() }
             if !overlay.isVisible, !isCapturePending { presentPicture() }
             // A visible overlay with no link would sit at its first frame.
             if overlay.isVisible, displayLink == nil { startDisplayLink() }
@@ -420,7 +462,8 @@ final class LidController: ObservableObject {
     /// a capture loop running.
     private func updatePrewarm(angle: Double, ceiling: Double) {
         let closingRecently = CACurrentMediaTime() - lastClosingTime < preferences.prewarmLinger
-        guard angle <= ceiling, closingRecently else {
+        // The glass has nothing to warm up.
+        guard capturesScreen, angle <= ceiling, closingRecently else {
             snapshotter.endPrewarm()
             streamer.stop()
             overlay.discardLive()
@@ -506,6 +549,14 @@ final class LidController: ObservableObject {
     /// already running counts as that wait.
     private func presentPicture() {
         guard preferences.isEnabled, !isSuspended, isActive else { return }
+        guard capturesScreen else {
+            // The next sample tries again if the glass cannot go up yet.
+            if let screen = NSScreen.builtIn,
+               overlay.showGlass(on: screen, startAngle: preferences.thresholdAngle, tuning: tuning) {
+                startDisplayLink()
+            }
+            return
+        }
         if preferences.isLivePicture, let screen = NSScreen.builtIn,
            overlay.showLive(
                on: screen,
@@ -661,7 +712,8 @@ final class LidController: ObservableObject {
             blurEvenness: preferences.blurEvenness,
             dimReach: preferences.dimReach,
             maxBlurRadius: preferences.maxBlurRadius,
-            maxDim: preferences.maxDim
+            maxDim: preferences.maxDim,
+            frost: preferences.frost
         )
     }
 
@@ -696,10 +748,15 @@ final class LidController: ObservableObject {
                 if self.isActive { self.setActive(false) }
                 self.streamer.stop()
                 self.streamer.invalidateFilter()
-                Task { await self.streamer.warmFilter() }
                 self.overlay.discardLive()
                 self.snapshotter.discard()
-                Task { await self.snapshotter.warmFilter() }
+                // Building a capture filter lists the shareable content,
+                // which would ask the glass for Screen Recording.
+                if self.capturesScreen {
+                    Task { await self.streamer.warmFilter() }
+                    Task { await self.snapshotter.warmFilter() }
+                }
+                self.prepareGlass()
             }
         }
     }

@@ -5,6 +5,9 @@
 "Leans the screen away as the lid closes." = "Leans the screen away as the lid closes.";
 "Live rendering" = "Live rendering";
 "Off holds the frame from when the effect started." = "Off holds the frame from when the effect started.";
+"Screen capture" = "Screen capture";
+"Draws the effect from a capture of the screen, with lean and perspective. Needs Screen Recording permission and more power. Off, macOS blurs and dims the live screen itself." = "Draws the effect from a capture of the screen, with lean and perspective. Needs Screen Recording permission and more power. Off, macOS blurs and dims the live screen itself.";
+"macOS on this Mac cannot blur the screen itself, so the effect captures it." = "macOS on this Mac cannot blur the screen itself, so the effect captures it.";
 "Start" = "Start";
 "Timeout" = "Timeout";
 "Ends the effect once the angle stops changing." = "Ends the effect once the angle stops changing.";
@@ -15,10 +18,12 @@
 "Look" = "Look";
 "Blur" = "Blur";
 "Blur radius at the far edge." = "Blur radius at the far edge.";
+"How frosted the glass is. 100% is tracing paper." = "How frosted the glass is. 100% is tracing paper.";
 "Blur spread" = "Blur spread";
 "0 blurs the far edge only, 100 the whole picture." = "0 blurs the far edge only, 100 the whole picture.";
 "Dimming" = "Dimming";
 "How dark the far edge goes." = "How dark the far edge goes.";
+"How much of the light the lifted glass loses shows as dark." = "How much of the light the lifted glass loses shows as dark.";
 "Dimming spread" = "Dimming spread";
 "Everything above this height goes fully dark." = "Everything above this height goes fully dark.";
 "Perspective" = "Perspective";

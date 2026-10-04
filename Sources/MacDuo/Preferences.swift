@@ -19,11 +19,13 @@ final class Preferences: ObservableObject {
         static let dimReach = "dimReach"
         static let showsAngleInMenuBar = "showsAngleInMenuBar"
         static let isLivePicture = "isLivePicture"
+        static let capturesScreen = "capturesScreen"
+        static let frost = "frost"
 
         static let all = [
             isEnabled, isTimeoutEnabled, thresholdAngle, blurSpan, maxBlurRadius,
             maxDim, viewingDistance, recession, blurEvenness, dimReach,
-            showsAngleInMenuBar, isLivePicture,
+            showsAngleInMenuBar, isLivePicture, capturesScreen, frost,
         ]
     }
 
@@ -40,6 +42,10 @@ final class Preferences: ObservableObject {
         Key.dimReach: 0.5,
         Key.showsAngleInMenuBar: false,
         Key.isLivePicture: true,
+        Key.capturesScreen: false,
+        // The blur upstream tuned by eye on a real lid, whose radius
+        // calibration ran 30% weaker than the measured one.
+        Key.frost: 0.7,
     ]
 
     /// Master switch for the depth effect.
@@ -108,6 +114,19 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(isLivePicture, forKey: Key.isLivePicture) }
     }
 
+    /// Capture the screen and draw the effect with Metal, instead of letting
+    /// the window server blur and dim the live screen. Needs Screen Recording
+    /// and more power, and is the only way to lean the picture back.
+    @Published var capturesScreen: Bool {
+        didSet { defaults.set(capturesScreen, forKey: Key.capturesScreen) }
+    }
+
+    /// How diffuse the window server's glass is. One scatters like tracing
+    /// paper, zero is clear.
+    @Published var frost: Double {
+        didSet { defaults.set(frost, forKey: Key.frost) }
+    }
+
     /// Eye distance in screen heights, at the two ends of the perspective
     /// slider. The panel offers the strength, which runs the other way.
     static let farthestEye: Double = 6
@@ -154,6 +173,8 @@ final class Preferences: ObservableObject {
         dimReach = defaults.double(forKey: Key.dimReach)
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
+        capturesScreen = defaults.bool(forKey: Key.capturesScreen)
+        frost = defaults.double(forKey: Key.frost)
     }
 
     func resetToDefaults() {
@@ -172,5 +193,7 @@ final class Preferences: ObservableObject {
         dimReach = defaults.double(forKey: Key.dimReach)
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
+        capturesScreen = defaults.bool(forKey: Key.capturesScreen)
+        frost = defaults.double(forKey: Key.frost)
     }
 }

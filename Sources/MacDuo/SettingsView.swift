@@ -42,7 +42,7 @@ struct SettingsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         switches
-                        if !hasScreenPermission {
+                        if !hasScreenPermission, controller.capturesScreen {
                             permissionNotice
                         }
                         startGroup
@@ -97,12 +97,29 @@ struct SettingsView: View {
                 help: localized("Leans the screen away as the lid closes.")
             )
             toggleRow(
+                localized("Screen capture"),
+                isOn: capturesScreen,
+                help: WindowServerBlur.isAvailable
+                    ? localized("Draws the effect from a capture of the screen, with lean and perspective. Needs Screen Recording permission and more power. Off, macOS blurs and dims the live screen itself.")
+                    : localized("macOS on this Mac cannot blur the screen itself, so the effect captures it.")
+            )
+            .disabled(!preferences.isEnabled || !WindowServerBlur.isAvailable)
+            toggleRow(
                 localized("Live rendering"),
                 isOn: $preferences.isLivePicture,
                 help: localized("Off holds the frame from when the effect started.")
             )
-            .disabled(!preferences.isEnabled)
+            // The glass always shows the live screen.
+            .disabled(!preferences.isEnabled || !controller.capturesScreen)
         }
+    }
+
+    /// On, and fixed, when the window server cannot draw the glass.
+    private var capturesScreen: Binding<Bool> {
+        Binding(
+            get: { controller.capturesScreen },
+            set: { preferences.capturesScreen = $0 }
+        )
     }
 
     private var startGroup: some View {
@@ -120,27 +137,42 @@ struct SettingsView: View {
                 localized("Full effect after"), value: $preferences.blurSpan, in: 5...60, format: "%.0f°",
                 help: localized("Degrees of further closing to reach full strength.")
             )
+            // The glass follows the lid's travel itself.
+            .disabled(!controller.capturesScreen)
         }
     }
 
     private var lookGroup: some View {
         group(localized("Look")) {
-            slider(
-                localized("Blur"), value: $preferences.maxBlurRadius, in: 10...160, format: "%.0f pt",
-                help: localized("Blur radius at the far edge.")
-            )
+            // The glass is a frosted sheet: the blur is how frosted it is,
+            // and the dimming how much of the light it loses shows.
+            if controller.capturesScreen {
+                slider(
+                    localized("Blur"), value: $preferences.maxBlurRadius, in: 10...160, format: "%.0f pt",
+                    help: localized("Blur radius at the far edge.")
+                )
+            } else {
+                slider(
+                    localized("Blur"), value: $preferences.frost, in: 0.1...1.5, format: "%.0f%%", scale: 100,
+                    help: localized("How frosted the glass is. 100% is tracing paper.")
+                )
+            }
             slider(
                 localized("Blur spread"), value: $preferences.blurEvenness, in: 0...1, format: "%.0f%%", scale: 100,
                 help: localized("0 blurs the far edge only, 100 the whole picture.")
             )
+            .disabled(!controller.capturesScreen)
             slider(
                 localized("Dimming"), value: $preferences.maxDim, in: 0...1, format: "%.0f%%", scale: 100,
-                help: localized("How dark the far edge goes.")
+                help: controller.capturesScreen
+                    ? localized("How dark the far edge goes.")
+                    : localized("How much of the light the lifted glass loses shows as dark.")
             )
             slider(
                 localized("Dimming spread"), value: $preferences.dimReach, in: 0.2...1, format: "%.0f%%", scale: 100,
                 help: localized("Everything above this height goes fully dark.")
             )
+            .disabled(!controller.capturesScreen)
         }
     }
 
@@ -155,6 +187,8 @@ struct SettingsView: View {
                 help: localized("0 keeps the sides parallel, 100 converges sharply.")
             )
         }
+        // The glass stays on the screen; only a captured picture can lean.
+        .disabled(!controller.capturesScreen)
     }
 
     private var appGroup: some View {
