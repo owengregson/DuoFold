@@ -44,16 +44,16 @@ struct LidWakePolicy {
     /// the open dwell, so a slow opening still gets to release the effect.
     static let settleDuration: TimeInterval = 1.5
 
-    /// Degrees above the start angle where a still lid counts as near it.
-    static let nearMargin: Double = 30
+    /// With the effect on, a still lid pushes at the sensor's own refresh,
+    /// wherever it rests: a fast close from fully open reaches the start
+    /// angle in a quarter of a second, and a capture needs its head start.
+    /// Measured, a process taking these readings shows no CPU time and no
+    /// idle wakeups.
+    static let enabledPushInterval: TimeInterval = 0.1
 
-    /// A still lid near the start angle pushes at the sensor's own refresh:
-    /// a close from there must be caught at once.
-    static let nearPushInterval: TimeInterval = 0.1
-
-    /// Further open, a close takes long enough to reach the start angle that
-    /// a slower watch still catches it.
-    static let farPushInterval: TimeInterval = 0.5
+    /// With the effect off, readings only keep the shown angle roughly
+    /// current.
+    static let disabledPushInterval: TimeInterval = 0.5
 
     /// Whether anything still needs a fresh angle on every poll.
     func needsFreshAngles(
@@ -61,6 +61,7 @@ struct LidWakePolicy {
         isClosingOut: Bool,
         isPanelOpen: Bool,
         isCapturePending: Bool,
+        isPrewarming: Bool,
         isActive: Bool,
         capturesScreen: Bool,
         isTimeoutEnabled: Bool,
@@ -68,6 +69,9 @@ struct LidWakePolicy {
         sinceMovement: TimeInterval
     ) -> Bool {
         if isPreviewing || isClosingOut || isPanelOpen || isCapturePending { return true }
+        // Only a poll ends a capture warmed up for a close that never came,
+        // once its linger runs out.
+        if isPrewarming { return true }
         if sinceMovement < Self.settleDuration { return true }
         guard isActive else { return false }
         // A capture keeps delivering frames, the timeout counts time, and a
@@ -75,8 +79,8 @@ struct LidWakePolicy {
         return capturesScreen || isTimeoutEnabled || !isPictureSettled
     }
 
-    func pushInterval(angle: Double, threshold: Double, isEnabled: Bool) -> TimeInterval {
-        isEnabled && angle <= threshold + Self.nearMargin ? Self.nearPushInterval : Self.farPushInterval
+    func pushInterval(isEnabled: Bool) -> TimeInterval {
+        isEnabled ? Self.enabledPushInterval : Self.disabledPushInterval
     }
 }
 

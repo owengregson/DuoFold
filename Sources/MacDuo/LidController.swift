@@ -101,6 +101,9 @@ final class LidController: ObservableObject {
     /// carries on before waiting for pushed readings.
     private static let movementThreshold: Double = 0.3
 
+    /// Degrees within which the eased picture has caught up with the lid.
+    private static let settledAngle: Double = 0.1
+
     /// Closing speed that counts as a deliberate close, in degrees per second.
     /// A still lid reads under 0.5.
     private static let triggerClosingSpeed: Double = 2
@@ -203,7 +206,7 @@ final class LidController: ObservableObject {
         }
         // Before the first poll, which reads it.
         builtInLayout = Layout(displayID: NSScreen.builtIn?.displayID, frame: NSScreen.builtIn?.frame)
-        pushInterval = LidWakePolicy.nearPushInterval
+        pushInterval = LidWakePolicy.enabledPushInterval
         let pushes = pushWatch.start(sensor, interval: pushInterval)
         Diagnostics.lid.notice("sensor pushes readings: \(pushes)")
         setPollInterval(Self.idlePollInterval)
@@ -390,10 +393,14 @@ final class LidController: ObservableObject {
             isClosingOut: isClosingOut,
             isPanelOpen: isPanelOpen,
             isCapturePending: isCapturePending,
+            isPrewarming: snapshotter.isPrewarming || streamer.isStarted,
             isActive: isActive,
             capturesScreen: capturesScreen,
             isTimeoutEnabled: preferences.isTimeoutEnabled,
-            isPictureSettled: abs(visualAngle.value - rawAngle) < 0.01 && abs(visualAngle.velocity) < 0.05,
+            // Looser than the hundredths a resting lid's reading flickers by,
+            // and far below what the blur could show.
+            isPictureSettled: abs(visualAngle.value - rawAngle) < Self.settledAngle
+                && abs(visualAngle.velocity) < 10 * Self.settledAngle,
             sinceMovement: now - lastMovementTime
         )
         if !needsAngles, pushWatch.isLive {
@@ -415,11 +422,7 @@ final class LidController: ObservableObject {
         // live. A wake restarts the link through `reconcile`.
         stopDisplayLink()
         pushWatch.sleep(at: angle)
-        let interval = wakePolicy.pushInterval(
-            angle: angle,
-            threshold: preferences.thresholdAngle,
-            isEnabled: preferences.isEnabled
-        )
+        let interval = wakePolicy.pushInterval(isEnabled: preferences.isEnabled)
         if interval != pushInterval {
             pushInterval = interval
             pushWatch.setInterval(interval, on: sensor)
@@ -926,7 +929,7 @@ final class LidController: ObservableObject {
             visualAngle.reset(to: angle)
         }
         if sensor.isPushing {
-            pushInterval = LidWakePolicy.nearPushInterval
+            pushInterval = LidWakePolicy.enabledPushInterval
             pushWatch.setInterval(pushInterval, on: sensor)
         }
         wake()

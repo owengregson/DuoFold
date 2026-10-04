@@ -73,17 +73,27 @@ struct LidWakeTests {
     }
 
     @Test
+    func testACaptureWarmedUpForACloseKeepsPolling() {
+        // The lid stopped short of the start angle within the pre-warm's
+        // linger. Only a poll can end the capture, so polling carries on
+        // even though the lid is still and the effect is not showing.
+        #expect(needs(isPrewarming: true, capturesScreen: true))
+        #expect(!needs(isPrewarming: false, capturesScreen: true))
+    }
+
+    @Test
     func testDwellFitsInsideTheSettle() {
         // A slow opening must still be polled long enough to release.
         #expect(LidWakePolicy.settleDuration > 1)
     }
 
     @Test
-    func testPushesFasterNearTheStartAngle() {
-        #expect(policy.pushInterval(angle: 95, threshold: 90, isEnabled: true) == LidWakePolicy.nearPushInterval)
-        #expect(policy.pushInterval(angle: 125, threshold: 90, isEnabled: true) == LidWakePolicy.farPushInterval)
-        #expect(policy.pushInterval(angle: 95, threshold: 90, isEnabled: false) == LidWakePolicy.farPushInterval)
-        #expect(LidWakePolicy.nearPushInterval < LidWakePolicy.farPushInterval)
+    func testPushesAtTheSensorsRefreshWhileTheEffectIsOn() {
+        #expect(policy.pushInterval(isEnabled: true) == LidWakePolicy.enabledPushInterval)
+        #expect(policy.pushInterval(isEnabled: false) == LidWakePolicy.disabledPushInterval)
+        // The sensor refreshes about every 100 ms; asking faster gains nothing.
+        #expect(LidWakePolicy.enabledPushInterval == 0.1)
+        #expect(LidWakePolicy.enabledPushInterval < LidWakePolicy.disabledPushInterval)
     }
 
     private func needs(
@@ -91,6 +101,7 @@ struct LidWakeTests {
         isClosingOut: Bool = false,
         isPanelOpen: Bool = false,
         isCapturePending: Bool = false,
+        isPrewarming: Bool = false,
         isActive: Bool = false,
         capturesScreen: Bool = false,
         isTimeoutEnabled: Bool = false,
@@ -102,6 +113,7 @@ struct LidWakeTests {
             isClosingOut: isClosingOut,
             isPanelOpen: isPanelOpen,
             isCapturePending: isCapturePending,
+            isPrewarming: isPrewarming,
             isActive: isActive,
             capturesScreen: capturesScreen,
             isTimeoutEnabled: isTimeoutEnabled,
