@@ -1,6 +1,5 @@
 import AppKit
 import Metal
-import MetalPerformanceShaders
 import QuartzCore
 import simd
 
@@ -63,8 +62,8 @@ final class DepthRenderer {
     /// frame that arrives first wins, since it is the newer of the two.
     private var pendingSeed: (buffer: MTLBuffer, width: Int, height: Int)?
     private static var hasReportedPyramidFailure = false
-    /// Built once, re-encoded for each new live frame.
-    private lazy var livePyramid = MPSImageGaussianPyramid(device: device, centerWeight: 0.375)
+    /// Built once, for both the held picture and the live one.
+    nonisolated private let pyramid: GaussianPyramid
 
     var isReady: Bool { texture != nil }
 
@@ -73,6 +72,7 @@ final class DepthRenderer {
               let queue = device.makeCommandQueue() else { return nil }
         self.device = device
         self.queue = queue
+        pyramid = GaussianPyramid(device: device)
 
         do {
             let library = try device.makeLibrary(source: DepthShaders.source, options: nil)
@@ -165,9 +165,10 @@ final class DepthRenderer {
             height: height,
             mipmapped: true
         )
-        descriptor.usage = [.shaderRead, .shaderWrite, .pixelFormatView]
+        // `renderTarget` lets the pyramid draw its levels where MPS cannot.
+        descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget, .pixelFormatView]
         descriptor.storageMode = .private
-        guard var texture = device.makeTexture(descriptor: descriptor),
+        guard let texture = device.makeTexture(descriptor: descriptor),
               let commands = queue.makeCommandBuffer(),
               let blit = commands.makeBlitCommandEncoder() else { return nil }
         blit.copy(
@@ -183,8 +184,10 @@ final class DepthRenderer {
         )
         blit.endEncoding()
 
-        MPSImageGaussianPyramid(device: device, centerWeight: 0.375)
-            .encode(commandBuffer: commands, inPlaceTexture: &texture, fallbackCopyAllocator: nil)
+        guard pyramid.encode(into: texture, on: commands) else {
+            Diagnostics.geometry.error("picture pyramid could not be built")
+            return nil
+        }
         commands.commit()
         commands.waitUntilCompleted()
         let finished = CFAbsoluteTimeGetCurrent()
@@ -231,8 +234,8 @@ final class DepthRenderer {
                 height: height,
                 mipmapped: true
             )
-            // `renderTarget` is only there for the one clear that blacks the
-            // margin.
+            // `renderTarget` is there for the one clear that blacks the
+            // margin, and for the pyramid where MPS cannot build it.
             descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget, .pixelFormatView]
             descriptor.storageMode = .private
             guard let fresh = device.makeTexture(descriptor: descriptor) else { return false }
@@ -299,7 +302,7 @@ final class DepthRenderer {
 
     /// Copies the newest frame into the picture and rebuilds the pyramid.
     private func absorbPending(into commands: MTLCommandBuffer) {
-        guard var target = liveTexture, pendingFrame != nil || pendingSeed != nil else { return }
+        guard let target = liveTexture, pendingFrame != nil || pendingSeed != nil else { return }
         let inset = Int((Self.paddingInPoints * pixelScale).rounded())
         guard let blit = commands.makeBlitCommandEncoder() else { return }
         if let frame = pendingFrame {
@@ -339,16 +342,10 @@ final class DepthRenderer {
         pendingFrame = nil
         pendingSeed = nil
         blit.endEncoding()
-        let built = livePyramid.encode(
-            commandBuffer: commands,
-            inPlaceTexture: &target,
-            fallbackCopyAllocator: nil
-        )
-        if !built, !Self.hasReportedPyramidFailure {
+        if !pyramid.encode(into: target, on: commands), !Self.hasReportedPyramidFailure {
             Self.hasReportedPyramidFailure = true
-            Diagnostics.geometry.error("live pyramid in place encode returned false")
+            Diagnostics.geometry.error("live pyramid could not be built")
         }
-        liveTexture = target
         texture = target
     }
 
