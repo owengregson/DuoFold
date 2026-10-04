@@ -48,6 +48,7 @@ struct SettingsView: View {
                         startGroup
                         lookGroup
                         perspectiveGroup
+                        hapticsGroup
                     }
                     .padding(.horizontal, Self.inset)
                     .padding(.vertical, 10)
@@ -167,6 +168,51 @@ struct SettingsView: View {
                 localized("Perspective"), value: perspective, in: 0...1, format: "%.0f%%", scale: 100,
                 help: localized("0 keeps the sides parallel, 100 converges sharply.")
             )
+        }
+    }
+
+    private var hapticStyle: HapticPattern.Style {
+        HapticPattern.Style(rawValue: preferences.hapticStyle) ?? .exponential
+    }
+
+    private var hapticsGroup: some View {
+        group(localized("Haptics")) {
+            toggleRow(
+                localized("Trackpad taps"),
+                isOn: $preferences.isHapticsEnabled,
+                help: localized("Taps the trackpad as the lid closes. Felt with a finger resting on it.")
+            )
+            VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(localized("Pattern"))
+                        Spacer()
+                        Picker("", selection: $preferences.hapticStyle) {
+                            ForEach(HapticPattern.Style.allCases) { style in
+                                Text(localized(style.titleKey)).tag(style.rawValue)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .controlSize(.small)
+                        .fixedSize()
+                        .accessibilityLabel(localized("Pattern"))
+                        Button(localized("Try")) { controller.tryHaptics() }
+                            .controlSize(.small)
+                    }
+                    description(localized(hapticStyle.summaryKey))
+                }
+                slider(
+                    localized("Strength"), value: $preferences.hapticStrength, in: 0.1...1, format: "%.0f%%", scale: 100
+                )
+                slider(
+                    localized("Taps"), value: $preferences.hapticTaps, in: 4...48, format: "%.0f",
+                    help: localized("Over the whole closing travel.")
+                )
+                .disabled(!hapticStyle.usesTapCount)
+                toggleRow(localized("While opening"), isOn: $preferences.isHapticsOnOpening, help: nil)
+            }
+            .disabled(!preferences.isHapticsEnabled)
         }
     }
 
@@ -332,6 +378,26 @@ struct SettingsView: View {
             }
         } catch {
             launchesAtLogin = SMAppService.mainApp.status == .enabled
+        }
+    }
+}
+
+private extension HapticPattern.Style {
+    var titleKey: String {
+        switch self {
+        case .linear: return "Linear"
+        case .exponential: return "Exponential"
+        case .swell: return "Swell"
+        case .bookends: return "Start and end"
+        }
+    }
+
+    var summaryKey: String {
+        switch self {
+        case .linear: return "Even taps, like detents."
+        case .exponential: return "Tiny taps that come faster and faster."
+        case .swell: return "Even taps that grow stronger."
+        case .bookends: return "One tap as the effect starts, a firm one at full effect."
         }
     }
 }

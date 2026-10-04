@@ -20,11 +20,17 @@ final class Preferences: ObservableObject {
         static let showsAngleInMenuBar = "showsAngleInMenuBar"
         static let showsMenuBarIcon = "showsMenuBarIcon"
         static let isLivePicture = "isLivePicture"
+        static let isHapticsEnabled = "isHapticsEnabled"
+        static let hapticStyle = "hapticStyle"
+        static let hapticStrength = "hapticStrength"
+        static let hapticTaps = "hapticTaps"
+        static let isHapticsOnOpening = "isHapticsOnOpening"
 
         static let all = [
             isEnabled, isTimeoutEnabled, thresholdAngle, blurSpan, maxBlurRadius,
             maxDim, viewingDistance, recession, blurEvenness, dimReach,
             showsAngleInMenuBar, showsMenuBarIcon, isLivePicture,
+            isHapticsEnabled, hapticStyle, hapticStrength, hapticTaps, isHapticsOnOpening,
         ]
     }
 
@@ -42,6 +48,11 @@ final class Preferences: ObservableObject {
         Key.showsAngleInMenuBar: false,
         Key.showsMenuBarIcon: true,
         Key.isLivePicture: true,
+        Key.isHapticsEnabled: true,
+        Key.hapticStyle: HapticPattern.Style.exponential.rawValue,
+        Key.hapticStrength: 0.6,
+        Key.hapticTaps: 20.0,
+        Key.isHapticsOnOpening: false,
     ]
 
     /// Master switch for the depth effect.
@@ -116,6 +127,31 @@ final class Preferences: ObservableObject {
     /// frame that was on screen at the trigger angle.
     @Published var isLivePicture: Bool {
         didSet { defaults.set(isLivePicture, forKey: Key.isLivePicture) }
+    }
+
+    /// Tap the trackpad as the lid closes through the effect.
+    @Published var isHapticsEnabled: Bool {
+        didSet { defaults.set(isHapticsEnabled, forKey: Key.isHapticsEnabled) }
+    }
+
+    /// A `HapticPattern.Style` raw value.
+    @Published var hapticStyle: String {
+        didSet { defaults.set(hapticStyle, forKey: Key.hapticStyle) }
+    }
+
+    /// The strongest tap of the pattern, 0...1.
+    @Published var hapticStrength: Double {
+        didSet { defaults.set(hapticStrength, forKey: Key.hapticStrength) }
+    }
+
+    /// Taps over the full travel, for the patterns that space them out.
+    @Published var hapticTaps: Double {
+        didSet { defaults.set(hapticTaps, forKey: Key.hapticTaps) }
+    }
+
+    /// Tap on the way back up too.
+    @Published var isHapticsOnOpening: Bool {
+        didSet { defaults.set(isHapticsOnOpening, forKey: Key.isHapticsOnOpening) }
     }
 
     /// Eye distance in screen heights, at the two ends of the perspective
@@ -198,6 +234,11 @@ final class Preferences: ObservableObject {
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)
         showsMenuBarIcon = defaults.bool(forKey: Key.showsMenuBarIcon)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
+        isHapticsEnabled = defaults.bool(forKey: Key.isHapticsEnabled)
+        hapticStyle = defaults.string(forKey: Key.hapticStyle) ?? HapticPattern.Style.exponential.rawValue
+        hapticStrength = defaults.double(forKey: Key.hapticStrength)
+        hapticTaps = defaults.double(forKey: Key.hapticTaps)
+        isHapticsOnOpening = defaults.bool(forKey: Key.isHapticsOnOpening)
     }
 
     func resetToDefaults() {
@@ -217,5 +258,10 @@ final class Preferences: ObservableObject {
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)
         showsMenuBarIcon = defaults.bool(forKey: Key.showsMenuBarIcon)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
+        isHapticsEnabled = defaults.bool(forKey: Key.isHapticsEnabled)
+        hapticStyle = defaults.string(forKey: Key.hapticStyle) ?? HapticPattern.Style.exponential.rawValue
+        hapticStrength = defaults.double(forKey: Key.hapticStrength)
+        hapticTaps = defaults.double(forKey: Key.hapticTaps)
+        isHapticsOnOpening = defaults.bool(forKey: Key.isHapticsOnOpening)
     }
 }

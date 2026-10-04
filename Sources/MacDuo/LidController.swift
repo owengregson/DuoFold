@@ -32,6 +32,9 @@ final class LidController: ObservableObject {
     private let overlay = DepthOverlay()
     private let streamer = ScreenStreamer()
     private let escapeKey = EscapeKey()
+    private let haptics = TrackpadHaptics()
+    /// The taps of the current run, if haptics are on.
+    private var hapticTrack: HapticTrack?
     private var hinge: LidHingeLimit
 
     private var enabledSubscription: AnyCancellable?
@@ -205,6 +208,7 @@ final class LidController: ObservableObject {
         overlay.discardLive()
         preview = nil
         isActive = false
+        endHaptics()
         updateEscapeKey()
     }
 
@@ -306,6 +310,10 @@ final class LidController: ObservableObject {
         peakAngle = max(peakAngle, angle)
         if isActive { lowestRunAngle = min(lowestRunAngle, angle) }
         publish(angle: angle)
+
+        // With no picture up there is no frame to follow, so the readings
+        // drive the taps.
+        if displayLink == nil { followHaptics(angle: angle) }
 
         if preferences.isEnabled {
             updateVelocity(with: angle)
@@ -522,10 +530,12 @@ final class LidController: ObservableObject {
             visualAngle.reset(to: rawAngle)
             snapshotter.endPrewarm()
             setPollInterval(Self.activePollInterval)
+            beginHaptics()
             presentPicture()
         } else {
             snapshotter.discard()
             timeoutReferenceAngle = nil
+            endHaptics()
             beginClosingOut()
         }
         updateEscapeKey()
@@ -651,6 +661,45 @@ final class LidController: ObservableObject {
         return min(max((effectiveThreshold - angle) / span, 0), 1)
     }
 
+    // MARK: - Haptics
+
+    private var hapticPattern: HapticPattern {
+        HapticPattern(
+            style: HapticPattern.Style(rawValue: preferences.hapticStyle) ?? .exponential,
+            taps: Int(preferences.hapticTaps.rounded()),
+            strength: preferences.hapticStrength
+        )
+    }
+
+    private func beginHaptics() {
+        guard preferences.isHapticsEnabled else {
+            hapticTrack = nil
+            return
+        }
+        hapticTrack = HapticTrack(
+            pattern: hapticPattern,
+            progress: blurProgress(for: rawAngle),
+            followsOpening: preferences.isHapticsOnOpening
+        )
+        followHaptics(angle: rawAngle)
+    }
+
+    private func followHaptics(angle: Double) {
+        guard isActive, let strength = hapticTrack?.advance(to: blurProgress(for: angle)) else { return }
+        haptics.tap(strength: strength)
+    }
+
+    private func endHaptics() {
+        guard hapticTrack != nil else { return }
+        hapticTrack = nil
+        haptics.rest()
+    }
+
+    /// Plays the chosen pattern over one quick close, for the settings panel.
+    func tryHaptics() {
+        haptics.play(hapticPattern, over: 1.2)
+    }
+
     // MARK: - Animation
 
     private func startDisplayLink() {
@@ -684,6 +733,7 @@ final class LidController: ObservableObject {
 
         guard isClosingOut else {
             applyVisual(angle: visualAngle.value)
+            followHaptics(angle: visualAngle.value)
             return
         }
         // At or above the threshold the picture is already flat, so a lid
