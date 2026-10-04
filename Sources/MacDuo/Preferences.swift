@@ -29,7 +29,7 @@ final class Preferences: ObservableObject {
 
     private static let factory: [String: Any] = [
         Key.isEnabled: true,
-        Key.isTimeoutEnabled: false,
+        Key.isTimeoutEnabled: true,
         Key.thresholdAngle: 90.0,
         Key.blurSpan: 60.0,
         Key.maxBlurRadius: 135.0,
@@ -48,7 +48,9 @@ final class Preferences: ObservableObject {
     }
 
     /// Ends the effect early if the angle holds still while below the
-    /// threshold, instead of waiting for the lid to open back past it.
+    /// threshold, instead of waiting for the lid to open back past it. On by
+    /// default, as the one release that asks nothing of the hinge. A saved
+    /// value outranks the registered default, so an existing choice stands.
     @Published var isTimeoutEnabled: Bool {
         didSet { defaults.set(isTimeoutEnabled, forKey: Key.isTimeoutEnabled) }
     }
