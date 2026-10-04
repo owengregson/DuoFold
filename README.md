@@ -21,8 +21,10 @@ With the default settings, it's recommended to view the effect in front of your 
 
 - **Window server rendering:** By default the macOS window server blurs and dims the live screen itself, modelled on a frosted sheet lifted off a page: the screen stays where the glass started, each point blurs by how far the glass has moved away from it, sharp at the hinge, and darkens by the light it loses. Nothing is captured, so no Screen Recording permission is needed.
 - **Low power:** The lid sensor pushes its readings, so the app sleeps until the lid moves.
-- **Metal rendering:** Turn on "Screen capture" to capture the screen with ScreenCaptureKit and render it with Metal instead, with the picture leaning back.
+- **Metal rendering:** Turn on "Screen capture" to capture the screen with ScreenCaptureKit and render it with Metal instead, with the picture leaning back. The blur is a stack of true Gaussian blurs half an octave apart: exact at the hinge, smooth at full strength, and dithered against banding.
 - **Adjustable perspective:** With screen capture, tweak the lean and perspective to suit your viewing position.
+- **Haptics:** The trackpad taps as the lid closes, in a pattern of your choice: even detents, tiny taps that come faster and faster, taps that swell, or one at the start and one at full effect.
+- **Out of the way:** Hide the menu bar icon if you like; open Mac Duo again to bring up its settings.
 
 
 > [!NOTE]
