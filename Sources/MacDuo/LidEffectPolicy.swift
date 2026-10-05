@@ -136,6 +136,39 @@ struct LidOpenDwell {
     }
 }
 
+/// How long the lid has stayed pressed shut. Nobody looks at a shut screen,
+/// so a run held shut long enough ends, and opening the lid shows the
+/// screen as it is.
+struct LidShutHold {
+    /// A lid at or below this is shut. Pressed shut it reads about a degree
+    /// below zero, and resting there it creeps up to half a degree above.
+    static let shutAngle: Double = 1
+
+    /// How long the lid stays shut before the run ends.
+    static let duration: TimeInterval = 2
+
+    private(set) var since: TimeInterval?
+
+    var isShut: Bool { since != nil }
+
+    mutating func update(angle: Double, at now: TimeInterval) {
+        if angle <= Self.shutAngle {
+            if since == nil { since = now }
+        } else {
+            since = nil
+        }
+    }
+
+    func hasHeld(at now: TimeInterval) -> Bool {
+        guard let since else { return false }
+        return now - since >= Self.duration
+    }
+
+    mutating func reset() {
+        since = nil
+    }
+}
+
 /// Holds off a new run after one was ended early, by the timeout or by
 /// Escape, until the lid has opened back to the start angle. Closing further
 /// from the same resting spot is not a new close.
@@ -261,11 +294,15 @@ struct LidEffectPolicy {
         wasClosingRecently: Bool,
         isClearlyOpening: Bool,
         hasDwelledOpen: Bool,
-        minimumDurationElapsed: Bool
+        minimumDurationElapsed: Bool,
+        hasHeldShut: Bool = false
     ) -> Bool {
         guard isEnabled else { return false }
 
         if isActive {
+            // A lid held shut ends the run, whatever the timeout is set to.
+            if hasHeldShut { return false }
+
             // Deliberately opening back across the configured start angle is
             // sufficient to recover even when threshold + hysteresis cannot
             // be reached by the hardware. The rise rules out a single

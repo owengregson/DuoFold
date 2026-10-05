@@ -81,6 +81,7 @@ final class LidController: ObservableObject {
     private var isSuspended = false
     private var isCapturePending = false
     private var openDwell = LidOpenDwell()
+    private var shutHold = LidShutHold()
     /// Where the lid last moved to by more than `timeoutMovementThreshold`,
     /// and when. The timeout counts from there.
     private var timeoutReferenceAngle: Double?
@@ -289,6 +290,7 @@ final class LidController: ObservableObject {
         stopEffectAndCapture()
         motion.reset()
         openDwell.reset()
+        shutHold.reset()
         peakAngle = 0
         if pollTimer != nil { setPollInterval(Self.idlePollInterval) }
     }
@@ -397,6 +399,7 @@ final class LidController: ObservableObject {
         if preferences.isEnabled {
             motion.update(with: angle, at: CACurrentMediaTime(), prewarmSpeed: preferences.closingSpeed)
             openDwell.update(angle: angle, at: CACurrentMediaTime(), dwellAngle: effectPolicy.dwellAngle)
+            shutHold.update(angle: angle, at: CACurrentMediaTime())
             reconcile(angle: angle)
         }
         updateEscapeKey()
@@ -428,6 +431,7 @@ final class LidController: ObservableObject {
             isActive: isActive,
             capturesScreen: capturesScreen,
             isTimeoutEnabled: preferences.isTimeoutEnabled,
+            isShut: shutHold.isShut,
             isPictureSettled: estimator.isSettled(at: now),
             sinceMovement: now - lastMovementTime
         )
@@ -573,8 +577,16 @@ final class LidController: ObservableObject {
             ),
             isClearlyOpening: motion.isClearlyOpening,
             hasDwelledOpen: openDwell.hasDwelled(at: now, duration: Self.openDwellDuration),
-            minimumDurationElapsed: minimumDurationElapsed
+            minimumDurationElapsed: minimumDurationElapsed,
+            hasHeldShut: shutHold.hasHeld(at: now)
         )
+
+        // A run ended by a shut lid stays over until the lid opens back to
+        // the start angle, as one the timeout ends does.
+        if isActive, !wanted, shutHold.hasHeld(at: now) {
+            Diagnostics.lid.notice("end: lid held shut, raw \(angle, format: .fixed(precision: 2))")
+            reopenLatch.engage()
+        }
 
         // The timeout only cuts short a run the policy would keep showing.
         if isActive, wanted, minimumDurationElapsed,
@@ -692,10 +704,11 @@ final class LidController: ObservableObject {
     /// the effect with the lid still shut would otherwise fade out a warped
     /// picture. `step(_:)` drives the ease and calls `finishClosingOut()`.
     private func beginClosingOut() {
-        // Nothing to ease before the picture is up, or with no link to draw it.
-        guard overlay.isVisible, displayLink != nil else {
+        // Nothing to ease before the picture is up, or with no link to draw
+        // it, and no one to ease it for on a shut lid, whose screen is dark.
+        guard overlay.isVisible, displayLink != nil, !shutHold.isShut else {
             stopDisplayLink()
-            overlay.dismiss(animated: true)
+            overlay.dismiss(animated: !shutHold.isShut)
             return
         }
         isClosingOut = true
@@ -1015,6 +1028,7 @@ final class LidController: ObservableObject {
         // closing movement.
         motion.reset()
         openDwell.reset()
+        shutHold.reset()
         peakAngle = 0
         timeoutReferenceAngle = nil
         reopenLatch.reset()
