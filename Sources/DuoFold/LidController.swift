@@ -58,7 +58,6 @@ final class LidController: ObservableObject {
     private var lastMovementTime: CFTimeInterval = 0
 
     private var enabledSubscription: AnyCancellable?
-    private var captureSubscription: AnyCancellable?
     private var pictureTask: Task<Void, Never>?
     private var pollTimer: Timer?
     private var pollInterval: TimeInterval = 0
@@ -191,20 +190,13 @@ final class LidController: ObservableObject {
                 self?.disableEffect()
             }
         escapeKey.onPress = { [weak self] in self?.escape() }
-        captureSubscription = preferences.$capturesScreen
-            .removeDuplicates()
-            .dropFirst()
-            // After the change lands: the publisher fires before it does.
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                MainActor.assumeIsolated { self?.switchRendering() }
-            }
     }
 
-    /// True when the effect is drawn from a screen capture: when the setting
-    /// asks for it, or when the window server cannot draw the glass.
+    /// True when the effect is drawn from a screen capture, the fallback for
+    /// a system whose window server cannot draw the glass or lean it back.
+    /// Needs Screen Recording.
     var capturesScreen: Bool {
-        preferences.capturesScreen || !WindowServerBlur.isAvailable
+        !WindowServerBlur.isAvailable || !GlassMesh.isAvailable
     }
 
     // MARK: - Lifecycle
@@ -248,7 +240,10 @@ final class LidController: ObservableObject {
         // The glass captures nothing, so it never touches ScreenCaptureKit
         // and never asks for Screen Recording.
         prepareGlass()
-        if capturesScreen { warmCapture() }
+        if capturesScreen {
+            Diagnostics.lid.notice("the window server cannot draw the glass, so the screen is captured")
+            warmCapture()
+        }
     }
 
     private func warmCapture() {
@@ -267,14 +262,6 @@ final class LidController: ObservableObject {
     private func prepareGlass() {
         guard let screen = NSScreen.builtIn else { return }
         overlay.prepareGlass(on: screen)
-    }
-
-    private func switchRendering() {
-        Diagnostics.lid.notice("rendering switched, captures screen: \(self.capturesScreen)")
-        stopEffectAndCapture()
-        guard isSensorAvailable else { return }
-        prepareGlass()
-        if capturesScreen { warmCapture() }
     }
 
     /// Has the capture under way for a close that looks about to reach the
@@ -965,7 +952,7 @@ final class LidController: ObservableObject {
 
     private var hapticPattern: HapticPattern {
         HapticPattern(
-            style: HapticPattern.Style(rawValue: preferences.hapticStyle) ?? .exponential,
+            style: HapticPattern.Style(rawValue: preferences.hapticStyle) ?? Preferences.factoryHapticStyle,
             taps: Int(preferences.hapticTaps.rounded()),
             strength: preferences.hapticStrength
         )

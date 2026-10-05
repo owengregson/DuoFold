@@ -15,6 +15,7 @@ struct GlassMatchesCaptureTests {
     private static let progresses = [0.0, 0.02, 0.1, 0.3, 0.55, 0.8, 1.0]
     private static let settings: [DepthTuning] = [
         // The factory settings.
+        DepthTuning(blurEvenness: 0.05, dimReach: 0.55, maxBlurRadius: 55, maxDim: 0.55),
         DepthTuning(blurEvenness: 0, dimReach: 0.5, maxBlurRadius: 135, maxDim: 1),
         DepthTuning(blurEvenness: 0.4, dimReach: 0.7, maxBlurRadius: 55, maxDim: 0.4),
         DepthTuning(blurEvenness: 1, dimReach: 1, maxBlurRadius: 160, maxDim: 0.75),

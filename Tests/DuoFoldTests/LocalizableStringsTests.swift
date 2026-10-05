@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import DuoFold
 
 struct LocalizableStringsTests {
 
@@ -35,6 +36,15 @@ struct LocalizableStringsTests {
         let chinese = try table("zh-Hans")
         for key in keys {
             #expect(chinese[key] != nil, "\(key) has no Chinese translation")
+        }
+    }
+
+    @Test
+    func testEveryPresetIsTranslated() throws {
+        let chinese = try table("zh-Hans")
+        for preset in EffectPreset.allCases {
+            #expect(chinese[preset.titleKey] != nil, "\(preset.titleKey) has no Chinese translation")
+            #expect(chinese[preset.summaryKey] != nil, "\(preset.summaryKey) has no Chinese translation")
         }
     }
 }

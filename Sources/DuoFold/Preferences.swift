@@ -9,6 +9,7 @@ final class Preferences: ObservableObject {
     private enum Key {
         static let isEnabled = "isEnabled"
         static let isTimeoutEnabled = "isTimeoutEnabled"
+        static let effectPreset = "effectPreset"
         static let thresholdAngle = "thresholdAngle"
         static let blurSpan = "blurSpan"
         static let maxBlurRadius = "maxBlurRadius"
@@ -21,7 +22,6 @@ final class Preferences: ObservableObject {
         static let showsAngleInMenuBar = "showsAngleInMenuBar"
         static let showsMenuBarIcon = "showsMenuBarIcon"
         static let isLivePicture = "isLivePicture"
-        static let capturesScreen = "capturesScreen"
         static let isHapticsEnabled = "isHapticsEnabled"
         static let hapticStyle = "hapticStyle"
         static let hapticStrength = "hapticStrength"
@@ -29,35 +29,42 @@ final class Preferences: ObservableObject {
         static let isHapticsOnOpening = "isHapticsOnOpening"
 
         static let all = [
-            isEnabled, isTimeoutEnabled, thresholdAngle, blurSpan, maxBlurRadius,
+            isEnabled, isTimeoutEnabled, effectPreset, thresholdAngle, blurSpan, maxBlurRadius,
             maxDim, viewingDistance, recession, maxLean, blurEvenness, dimReach,
-            showsAngleInMenuBar, showsMenuBarIcon, isLivePicture, capturesScreen,
+            showsAngleInMenuBar, showsMenuBarIcon, isLivePicture,
             isHapticsEnabled, hapticStyle, hapticStrength, hapticTaps, isHapticsOnOpening,
         ]
     }
 
-    private static let factory: [String: Any] = [
-        Key.isEnabled: true,
-        Key.isTimeoutEnabled: true,
-        Key.thresholdAngle: 90.0,
-        Key.blurSpan: 60.0,
-        Key.maxBlurRadius: 135.0,
-        Key.maxDim: 1.0,
-        Key.viewingDistance: 6.0,
-        Key.recession: 1.0,
-        Key.maxLean: 45.0,
-        Key.blurEvenness: 0.0,
-        Key.dimReach: 0.5,
-        Key.showsAngleInMenuBar: false,
-        Key.showsMenuBarIcon: true,
-        Key.isLivePicture: true,
-        Key.capturesScreen: false,
-        Key.isHapticsEnabled: true,
-        Key.hapticStyle: HapticPattern.Style.exponential.rawValue,
-        Key.hapticStrength: 0.6,
-        Key.hapticTaps: 20.0,
-        Key.isHapticsOnOpening: false,
-    ]
+    static let factoryHapticStyle = HapticPattern.Style.swell
+    static let factoryHapticStrength = 1.0
+    static let factoryHapticTaps = 48.0
+
+    private static let factory: [String: Any] = {
+        let effect = EffectPreset.standard.settings
+        return [
+            Key.isEnabled: true,
+            Key.isTimeoutEnabled: false,
+            Key.effectPreset: EffectPreset.standard.rawValue,
+            Key.thresholdAngle: effect.thresholdAngle,
+            Key.blurSpan: effect.blurSpan,
+            Key.maxBlurRadius: effect.maxBlurRadius,
+            Key.maxDim: effect.maxDim,
+            Key.viewingDistance: effect.viewingDistance,
+            Key.recession: effect.recession,
+            Key.maxLean: effect.maxLean,
+            Key.blurEvenness: effect.blurEvenness,
+            Key.dimReach: effect.dimReach,
+            Key.showsAngleInMenuBar: true,
+            Key.showsMenuBarIcon: true,
+            Key.isLivePicture: true,
+            Key.isHapticsEnabled: true,
+            Key.hapticStyle: factoryHapticStyle.rawValue,
+            Key.hapticStrength: factoryHapticStrength,
+            Key.hapticTaps: factoryHapticTaps,
+            Key.isHapticsOnOpening: true,
+        ]
+    }()
 
     /// Master switch for the depth effect.
     @Published var isEnabled: Bool {
@@ -65,11 +72,17 @@ final class Preferences: ObservableObject {
     }
 
     /// Ends the effect early if the angle holds still while below the
-    /// threshold, instead of waiting for the lid to open back past it. On by
-    /// default, as the one release that asks nothing of the hinge. A saved
-    /// value outranks the registered default, so an existing choice stands.
+    /// threshold, instead of waiting for the lid to open back past it. A
+    /// saved value outranks the registered default, so an existing choice
+    /// stands.
     @Published var isTimeoutEnabled: Bool {
         didSet { defaults.set(isTimeoutEnabled, forKey: Key.isTimeoutEnabled) }
+    }
+
+    /// The preset the effect settings were last set from, an
+    /// `EffectPreset` raw value. The settings may have been edited since.
+    @Published var effectPresetName: String {
+        didSet { defaults.set(effectPresetName, forKey: Key.effectPreset) }
     }
 
     /// Closing past this angle starts the depth effect. Degrees.
@@ -133,16 +146,10 @@ final class Preferences: ObservableObject {
     }
 
     /// Keep the picture under the effect updating, instead of holding the one
-    /// frame that was on screen at the trigger angle.
+    /// frame that was on screen at the trigger angle. Only the screen capture
+    /// can hold a frame.
     @Published var isLivePicture: Bool {
         didSet { defaults.set(isLivePicture, forKey: Key.isLivePicture) }
-    }
-
-    /// Capture the screen and draw the effect with Metal, instead of letting
-    /// the window server blur and dim the live screen. Needs Screen Recording
-    /// and more power, and is the only way to lean the picture back.
-    @Published var capturesScreen: Bool {
-        didSet { defaults.set(capturesScreen, forKey: Key.capturesScreen) }
     }
 
     /// Tap the trackpad as the lid closes through the effect.
@@ -172,9 +179,54 @@ final class Preferences: ObservableObject {
 
     /// Eye distance in screen heights, at the two ends of the perspective
     /// slider. The panel offers the strength, which runs the other way.
-    static let farthestEye: Double = 6
-    static let nearestEye: Double = 1
-    static let eyeRange: Double = farthestEye - nearestEye
+    nonisolated static let farthestEye: Double = 6
+    nonisolated static let nearestEye: Double = 1
+    nonisolated static let eyeRange: Double = farthestEye - nearestEye
+
+    /// The preset the effect settings started from.
+    var effectPreset: EffectPreset {
+        EffectPreset(rawValue: effectPresetName) ?? .standard
+    }
+
+    /// The settings a preset sets, as they stand.
+    var effect: EffectSettings {
+        get {
+            EffectSettings(
+                thresholdAngle: thresholdAngle, blurSpan: blurSpan, maxBlurRadius: maxBlurRadius,
+                blurEvenness: blurEvenness, maxDim: maxDim, dimReach: dimReach,
+                recession: recession, maxLean: maxLean, viewingDistance: viewingDistance
+            )
+        }
+        set {
+            for field in EffectField.allCases {
+                self[keyPath: Self.keyPath(field)] = newValue[keyPath: field.keyPath]
+            }
+        }
+    }
+
+    /// Whether the effect settings have moved off the preset they started from.
+    var isEffectEdited: Bool {
+        !effect.reads(like: effectPreset.settings)
+    }
+
+    func apply(_ preset: EffectPreset) {
+        effectPresetName = preset.rawValue
+        effect = preset.settings
+    }
+
+    static func keyPath(_ field: EffectField) -> ReferenceWritableKeyPath<Preferences, Double> {
+        switch field {
+        case .thresholdAngle: return \.thresholdAngle
+        case .blurSpan: return \.blurSpan
+        case .maxBlurRadius: return \.maxBlurRadius
+        case .blurEvenness: return \.blurEvenness
+        case .maxDim: return \.maxDim
+        case .dimReach: return \.dimReach
+        case .recession: return \.recession
+        case .maxLean: return \.maxLean
+        case .viewingDistance: return \.viewingDistance
+        }
+    }
 
     /// Highest angle above the threshold at which the pre-warm may run.
     let prewarmCeiling: Double = 70
@@ -227,6 +279,9 @@ final class Preferences: ObservableObject {
     /// Settings from earlier versions, removed at launch.
     private static let retired = [
         "blurFrontWidth", "maxTilt", "tiltDegrees", "tiltRatio", "dimEvenness",
+        // The screen capture is now only the fallback for a system whose
+        // window server cannot draw the glass.
+        "capturesScreen",
     ]
 
     private let defaults = UserDefaults.standard
@@ -239,6 +294,7 @@ final class Preferences: ObservableObject {
         for key in Self.retired { defaults.removeObject(forKey: key) }
         isEnabled = defaults.bool(forKey: Key.isEnabled)
         isTimeoutEnabled = defaults.bool(forKey: Key.isTimeoutEnabled)
+        effectPresetName = defaults.string(forKey: Key.effectPreset) ?? EffectPreset.standard.rawValue
         thresholdAngle = defaults.double(forKey: Key.thresholdAngle)
         blurSpan = defaults.double(forKey: Key.blurSpan)
         maxBlurRadius = defaults.double(forKey: Key.maxBlurRadius)
@@ -251,9 +307,8 @@ final class Preferences: ObservableObject {
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)
         showsMenuBarIcon = defaults.bool(forKey: Key.showsMenuBarIcon)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
-        capturesScreen = defaults.bool(forKey: Key.capturesScreen)
         isHapticsEnabled = defaults.bool(forKey: Key.isHapticsEnabled)
-        hapticStyle = defaults.string(forKey: Key.hapticStyle) ?? HapticPattern.Style.exponential.rawValue
+        hapticStyle = defaults.string(forKey: Key.hapticStyle) ?? Self.factoryHapticStyle.rawValue
         hapticStrength = defaults.double(forKey: Key.hapticStrength)
         hapticTaps = defaults.double(forKey: Key.hapticTaps)
         isHapticsOnOpening = defaults.bool(forKey: Key.isHapticsOnOpening)
@@ -265,6 +320,7 @@ final class Preferences: ObservableObject {
         }
         isEnabled = defaults.bool(forKey: Key.isEnabled)
         isTimeoutEnabled = defaults.bool(forKey: Key.isTimeoutEnabled)
+        effectPresetName = defaults.string(forKey: Key.effectPreset) ?? EffectPreset.standard.rawValue
         thresholdAngle = defaults.double(forKey: Key.thresholdAngle)
         blurSpan = defaults.double(forKey: Key.blurSpan)
         maxBlurRadius = defaults.double(forKey: Key.maxBlurRadius)
@@ -277,9 +333,8 @@ final class Preferences: ObservableObject {
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)
         showsMenuBarIcon = defaults.bool(forKey: Key.showsMenuBarIcon)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
-        capturesScreen = defaults.bool(forKey: Key.capturesScreen)
         isHapticsEnabled = defaults.bool(forKey: Key.isHapticsEnabled)
-        hapticStyle = defaults.string(forKey: Key.hapticStyle) ?? HapticPattern.Style.exponential.rawValue
+        hapticStyle = defaults.string(forKey: Key.hapticStyle) ?? Self.factoryHapticStyle.rawValue
         hapticStrength = defaults.double(forKey: Key.hapticStrength)
         hapticTaps = defaults.double(forKey: Key.hapticTaps)
         isHapticsOnOpening = defaults.bool(forKey: Key.isHapticsOnOpening)
