@@ -43,10 +43,21 @@ enum WindowServerBlur {
         let filterClass: NSObject.Type
         /// The optional blur inputs this system's filter accepts.
         let optionalInputs: Set<String>
+        /// Whether this system has the reach filter (`makeReach`).
+        let hasReach: Bool
     }
 
     private static let filterType = "gaussianBlur"
     private static let radiusKey = "inputRadius"
+
+    /// How far the window server redraws around a change under a band, in
+    /// points, through the reach filter (`makeReach`). Wider than any
+    /// screen, so a change anywhere under a band has all of it redrawn.
+    static let damageReach = 8192.0
+    private static let reachType = "displacementMap"
+    private static let reachAmountKey = "inputAmount"
+    private static let reachOffsetKey = "inputOffset"
+    private static let reachMapKey = "inputMaskImage"
     /// Clamps the blur at the band's edges instead of fading it to nothing.
     private static let normalizeEdgesKey = "inputNormalizeEdges"
     /// A wide blur of a dark screen is a smooth near-black gradient, which 8
@@ -83,12 +94,57 @@ enum WindowServerBlur {
             Diagnostics.geometry.notice("window server blur: filter takes no radius")
             return nil
         }
+        var hasReach = false
+        if types.contains(reachType),
+           let reach = filterClass.perform(NSSelectorFromString("filterWithType:"), with: reachType)?.takeUnretainedValue() as? NSObject,
+           let reachKeys = reach.perform(keysSelector)?.takeUnretainedValue() as? [String],
+           Set(reachKeys).isSuperset(of: [reachAmountKey, reachOffsetKey, reachMapKey]) {
+            hasReach = true
+        } else {
+            Diagnostics.geometry.notice("window server blur: no \(reachType, privacy: .public) filter, bands redraw only around a change")
+        }
         return Runtime(
             backdropClass: backdropClass,
             filterClass: filterClass,
-            optionalInputs: Set(keys).intersection([normalizeEdgesKey, ditherKey])
+            optionalInputs: Set(keys).intersection([normalizeEdgesKey, ditherKey]),
+            hasReach: hasReach
         )
     }
+
+    /// A filter that draws nothing but makes the window server redraw all
+    /// of a band whenever anything under it changes.
+    ///
+    /// The window server redraws only what changed, and under a backdrop it
+    /// widens that by the radius the backdrop's first blur-like filter
+    /// reports (QuartzCore `Update::all_backdrop_info`, SkyLight
+    /// `adjust_update_shapes_for_backdrops`). A leaning band shows each
+    /// spot of the screen somewhere else, so a redraw of just the change
+    /// and its blur reads black beyond what it captured and leaves the
+    /// moved picture stale. A `displacementMap` ahead of the blur reports
+    /// `|inputAmount|` as its radius whatever it draws; with a white map
+    /// and an offset of one it moves nothing, so the band's picture is the
+    /// blur's alone (`GlassDisplacementFilterTests`), while the window
+    /// server redraws the whole band, and every band overlapping it, for
+    /// any change under them.
+    private static func makeReach(_ runtime: Runtime) -> NSObject? {
+        guard runtime.hasReach,
+              let reach = runtime.filterClass.perform(NSSelectorFromString("filterWithType:"), with: reachType)?
+                  .takeUnretainedValue() as? NSObject,
+              let map = whiteMap else { return nil }
+        reach.setValue(damageReach, forKey: reachAmountKey)
+        reach.setValue(CGPoint(x: 1, y: 1), forKey: reachOffsetKey)
+        reach.setValue(map, forKey: reachMapKey)
+        return reach
+    }
+
+    private static let whiteMap: CGImage? = {
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: 4, height: 4, bitsPerComponent: 8, bytesPerRow: 16, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        return context.makeImage()
+    }()
 
     private static func makeFilter(_ filterClass: NSObject.Type) -> NSObject? {
         filterClass.perform(NSSelectorFromString("filterWithType:"), with: filterType)?
@@ -111,7 +167,8 @@ enum WindowServerBlur {
         return band
     }
 
-    /// Sets the band's blur radius, in points.
+    /// Sets the band's blur radius, in points. The blur is the last filter;
+    /// the reach filter (`makeReach`), if this system has it, runs first.
     ///
     /// A fresh filter rather than a key path into the attached one: every
     /// step of it is checked above, and assigning `filters` always reaches
@@ -122,6 +179,11 @@ enum WindowServerBlur {
         for key in runtime.optionalInputs {
             filter.setValue(true, forKey: key)
         }
-        band.filters = [filter]
+        band.filters = [makeReach(runtime), filter].compactMap { $0 }
+    }
+
+    /// The blur filter of a band `setRadius` set up.
+    static func blurFilter(of band: CALayer) -> NSObject? {
+        band.filters?.last as? NSObject
     }
 }

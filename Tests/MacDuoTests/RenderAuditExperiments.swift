@@ -375,41 +375,6 @@ struct RenderAuditExperiments {
         }
     }
 
-    /// What the refresh toggle changes in the pixels, and whether the blur's
-    /// dither moves between frames of a still scene.
-    @Test(.enabled(if: enabled))
-    func refreshToggleAndDitherAreStill() throws {
-        let screen = CGSize(width: 504, height: 328)
-        let rig = try #require(GlassFidelityRig(screen: screen, scale: 2))
-        let tuning = DepthTuning(viewingDistance: 4, recession: 0.8, blurEvenness: 0.1, dimReach: 0.6, maxBlurRadius: 40, maxDim: 0.8)
-        let corners = GlassFidelityTests.corners(progress: 0.6, start: 85, span: 60, maxLean: 60)
-        let lean = GlassLean(corners: corners, screenSize: screen, padded: DepthRenderer.paddedFrame(screenSize: screen, pixelScale: 2))
-        var frames: [GlassFidelityRig.Frame] = []
-        for refreshes in [0, 1, 2] {
-            let frame = try #require(rig.glass { view in
-                view.apply(progress: 0.6, tuning: tuning, gradient: BlurGradient(), lean: lean)
-                for _ in 0..<refreshes { view.refresh() }
-            })
-            frames.append(frame)
-        }
-        print("audit: refresh toggle: opacity 1 vs 0.99999 \(GlassFidelityRig.difference(frames[0], frames[1])); 1 vs 1 again \(GlassFidelityRig.difference(frames[0], frames[2]))")
-        // The same tree twice, some time apart.
-        let view = FrostedGlassView(frame: NSRect(origin: .zero, size: screen), scale: 2, samplesOtherWindows: false)
-        let root = try #require(view.layer)
-        root.frame = CGRect(origin: .zero, size: screen)
-        let backdrop = CALayer()
-        backdrop.anchorPoint = .zero
-        backdrop.frame = root.bounds
-        backdrop.contents = rig.picture
-        backdrop.contentsScale = 2
-        root.insertSublayer(backdrop, at: 0)
-        view.apply(progress: 0.6, tuning: tuning, gradient: BlurGradient(), lean: lean)
-        let live = try #require(GlassFidelityRig.LiveRenderer(rig: rig, root: root))
-        let first = try #require(live.frame())
-        Thread.sleep(forTimeInterval: 0.3)
-        let second = try #require(live.frame())
-        print("audit: still scene drawn twice 0.3 s apart: \(GlassFidelityRig.difference(first, second))")
-    }
 
     /// Where the band count changes as progress rises, and how much the
     /// picture jumps there against a step of the same size elsewhere.
