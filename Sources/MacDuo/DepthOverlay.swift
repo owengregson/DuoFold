@@ -56,15 +56,13 @@ struct DepthGeometry {
 }
 
 /// The settings that shape one frame.
-struct DepthTuning {
+struct DepthTuning: Equatable {
     var viewingDistance: Double = 2.7
     var recession: Double = 2
     var blurEvenness: Double = 0.4
     var dimReach: Double = 0.7
     var maxBlurRadius: Double = 55
     var maxDim: Double = 0.4
-    /// How diffuse the window server's glass is.
-    var frost: Double = 0.7
 }
 
 private final class MetalHostView: NSView {
@@ -225,8 +223,8 @@ final class DepthOverlay {
     }
 
     /// Shows the glass, through which the window server blurs and dims
-    /// whatever is behind it. Nothing is captured. Flat, the glass is the
-    /// screen itself, so it shows at once with no fade.
+    /// whatever is behind it. Nothing is captured. At the start angle it
+    /// blurs and dims nothing, so it shows at once with no fade.
     @discardableResult
     func showGlass(on screen: NSScreen, startAngle: Double, tuning: DepthTuning) -> Bool {
         dismiss(animated: false)
@@ -342,14 +340,10 @@ final class DepthOverlay {
 
     func update(progress: Double, currentAngle: Double, tuning: DepthTuning) {
         if showsGlass, let glassView {
-            // The glass is lifted off the screen it left by the whole of the
-            // lid's travel, and the optics take it from there.
+            // The glass cannot lean, so it takes only the blur and dimming
+            // the captured picture gets at this point of the travel.
             self.tuning = tuning
-            glassView.apply(
-                lift: max(startAngle - currentAngle, 0) * .pi / 180,
-                frost: tuning.frost,
-                darkness: tuning.maxDim
-            )
+            glassView.apply(progress: progress, tuning: tuning, gradient: gradient)
             return
         }
         guard let renderer, renderer.isReady else { return }

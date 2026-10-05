@@ -5,11 +5,11 @@ import QuartzCore
 /// overlay. Nothing is captured, so it needs no Screen Recording permission,
 /// runs no capture stream and draws nothing on the GPU from this process.
 ///
-/// It draws `FrostedGlass`: each height up the glass is blurred as much as a
-/// frosted sheet lifted that far off the screen would blur it, by a stack of
-/// uniform blur bands (`FrostBandLayout`), and darkened by the share of its
-/// light that would miss the screen, by one black layer whose opacity comes
-/// from a small grid.
+/// It blurs and dims by the same rules as the captured picture
+/// (`BlurGradient`), with the same settings, and only leaves out the lean:
+/// each height is blurred by a stack of uniform blur bands
+/// (`FrostBandLayout`), and darkened by one black layer whose opacity rises
+/// from the hinge.
 ///
 /// Built only when `WindowServerBlur.isAvailable`.
 @MainActor
@@ -17,23 +17,20 @@ final class FrostedGlassView: NSView {
 
     /// Shared by every band, so they draw from one capture of the screen.
     private static let groupName = "MacDuo.frostedGlass"
-    /// Darkening grid columns across the glass. It varies slowly, and the
-    /// layer interpolates between its points.
-    private static let shadeColumns = 64
+    /// Darkening stops across the dimming's rise. The layer runs straight
+    /// between them, which keeps within a step of 8 bits of the smoothstep.
+    nonisolated private static let shadeIntervals = 24
 
     private let bandLayout = FrostBandLayout()
     private let samplesOtherWindows: Bool
     private var bands: [CALayer] = []
-    private let shade = CALayer()
+    private let shade = CAGradientLayer()
     private var lastState: State?
-    /// Brightness grids by whole degree of lift, for `cachedSize`.
-    private var brightnessCache: [Int: [Double]] = [:]
-    private var cachedSize: CGSize = .zero
 
     private struct State: Equatable {
-        var lift: Double
-        var frost: Double
-        var darkness: Double
+        var progress: Double
+        var tuning: DepthTuning
+        var gradient: BlurGradient
         var size: CGSize
     }
 
@@ -49,8 +46,8 @@ final class FrostedGlassView: NSView {
         layerContentsRedrawPolicy = .never
 
         shade.anchorPoint = .zero
-        shade.contentsGravity = .resize
-        shade.magnificationFilter = .linear
+        shade.startPoint = CGPoint(x: 0.5, y: 0)
+        shade.endPoint = CGPoint(x: 0.5, y: 1)
         shade.isHidden = true
         root.addSublayer(shade)
     }
@@ -67,25 +64,17 @@ final class FrostedGlassView: NSView {
         layer?.frame = bounds
         CATransaction.commit()
         if let lastState {
-            apply(lift: lastState.lift, frost: lastState.frost, darkness: lastState.darkness)
+            apply(progress: lastState.progress, tuning: lastState.tuning, gradient: lastState.gradient)
         }
     }
 
-    /// - Parameters:
-    ///   - lift: the angle between the glass and the screen it left, radians.
-    ///   - frost: how diffuse the glass is. One scatters like tracing paper,
-    ///     zero is clear.
-    ///   - darkness: how much of the light the lifted glass loses shows as
-    ///     dark. One is all of it.
-    func apply(lift: Double, frost: Double, darkness: Double) {
+    /// - Parameter progress: how far the lid has closed past the start
+    ///   angle, as a share of the travel to full effect, as the captured
+    ///   picture gets it.
+    func apply(progress: Double, tuning: DepthTuning, gradient: BlurGradient) {
         let size = bounds.size
         guard size.width > 0, size.height > 0 else { return }
-        let state = State(
-            lift: min(max(lift, 0), .pi / 2),
-            frost: max(frost, 0),
-            darkness: min(max(darkness, 0), 1),
-            size: size
-        )
+        let state = State(progress: min(max(progress, 0), 1), tuning: tuning, gradient: gradient, size: size)
         guard state != lastState else { return }
         lastState = state
 
@@ -94,14 +83,11 @@ final class FrostedGlassView: NSView {
         defer { CATransaction.commit() }
 
         let height = Double(size.height)
-        let sigmaPerHeight = state.frost * FrostedGlass.gaussianSigmaPerHeight(lift: state.lift)
-        // Points of blur radius per point up the glass.
-        let radiusPerHeight = sigmaPerHeight * sin(state.lift) / WindowServerBlur.sigmaPerRadius
-        // Past half the glass's height a blur is a wash of colour whatever
-        // its radius, and a wider one only captures more of the screen.
         let planned = bandLayout.bands(
-            radiusPerHeight: radiusPerHeight,
-            height: height,
+            for: Self.blurProfile(progress: state.progress, tuning: tuning, gradient: gradient, height: height),
+            // Past half the glass's height a blur is a wash of colour
+            // whatever its radius, and a wider one only captures more of the
+            // screen. The settings stay well short of it.
             maximumRadius: height / 2
         )
         while bands.count < planned.count, let band = makeBand() {
@@ -116,10 +102,57 @@ final class FrostedGlassView: NSView {
             place(band, as: planned[index], width: Double(size.width))
         }
 
-        shade.isHidden = state.lift < 1e-4 || state.darkness <= 0
-        if !shade.isHidden, let shaded = shadeImage(for: state) {
-            shade.frame = shaded.frame
-            shade.contents = shaded.image
+        let stops = Self.shadeStops(progress: state.progress, tuning: tuning, gradient: gradient, height: height)
+        shade.isHidden = !stops.contains { $0.opacity > 0 }
+        if !shade.isHidden {
+            shade.frame = bounds
+            shade.locations = stops.map { NSNumber(value: $0.position / height) }
+            shade.colors = stops.map { CGColor(gray: 0, alpha: $0.opacity) }
+        }
+    }
+
+    /// The blur up the glass in band radii: the captured picture's sigma at
+    /// each height, through the window server's radius to sigma.
+    nonisolated static func blurProfile(
+        progress: Double,
+        tuning: DepthTuning,
+        gradient: BlurGradient,
+        height: Double
+    ) -> FrostBandLayout.Profile {
+        let span = gradient.sigmaSpan(
+            progress: progress,
+            maxBlurRadius: tuning.maxBlurRadius,
+            evenness: min(max(tuning.blurEvenness, 0), 1)
+        )
+        return FrostBandLayout.Profile(
+            floor: span.hinge / WindowServerBlur.sigmaPerRadius,
+            rise: span.range / WindowServerBlur.sigmaPerRadius,
+            exponent: gradient.blurHeightCurve,
+            height: height
+        )
+    }
+
+    /// The black layer's opacity up the glass: the share of brightness the
+    /// captured picture loses at each height.
+    ///
+    /// The window server blends the black over encoded values, taking that
+    /// share of them away, which is what the picture's shader does through
+    /// its 2.2 power on linear light.
+    nonisolated static func shadeStops(
+        progress: Double,
+        tuning: DepthTuning,
+        gradient: BlurGradient,
+        height: Double
+    ) -> [FrostBandLayout.Stop] {
+        // Past the reach the dimming holds, so one more stop at the top.
+        let reach = min(max(tuning.dimReach, 0.02), 1)
+        var shares = (0...shadeIntervals).map { reach * Double($0) / Double(shadeIntervals) }
+        if reach < 1 { shares.append(1) }
+        return shares.map { share in
+            FrostBandLayout.Stop(
+                position: share * height,
+                opacity: gradient.dimming(progress: progress, height: share, maxDim: tuning.maxDim, reach: reach)
+            )
         }
     }
 
@@ -151,9 +184,14 @@ final class FrostedGlassView: NSView {
         guard let fade = band.mask as? CAGradientLayer else { return }
         fade.frame = band.bounds
         // Clear from the band's bottom to the first stop, opaque from the
-        // last stop to its top.
-        var locations: [NSNumber] = [0]
-        var colours: [CGColor] = [CGColor(gray: 0, alpha: 0)]
+        // last stop to its top. A band opaque from the hinge, over a blurred
+        // hinge, has no clear part.
+        var locations: [NSNumber] = []
+        var colours: [CGColor] = []
+        if let first = plan.fade.first, first.position > plan.bottom {
+            locations.append(0)
+            colours.append(CGColor(gray: 0, alpha: 0))
+        }
         for stop in plan.fade {
             let location = min(max((stop.position - plan.bottom) / extent, 0), 1)
             locations.append(NSNumber(value: location))
@@ -163,75 +201,5 @@ final class FrostedGlassView: NSView {
         colours.append(CGColor(gray: 0, alpha: 1))
         fade.locations = locations
         fade.colors = colours
-    }
-
-    // MARK: - Darkening
-
-    /// The black layer's opacity on a grid, and where the layer goes: half a
-    /// grid cell past the glass on every side, so the cells' centres, where
-    /// the layer is exact, fall on the grid points, edges included.
-    private func shadeImage(for state: State) -> (image: CGImage, frame: CGRect)? {
-        let size = state.size
-        let columns = Self.shadeColumns
-        let rows = max(Int((Double(columns) * Double(size.height) / Double(size.width)).rounded()), 2)
-        if size != cachedSize {
-            brightnessCache = [:]
-            cachedSize = size
-        }
-        // Whole degree grids, mixed for the angle in between.
-        let degrees = state.lift * 180 / .pi
-        let lower = Int(degrees.rounded(.down))
-        let mix = degrees - Double(lower)
-        let below = brightness(degree: lower, columns: columns, rows: rows, size: size)
-        let above = mix > 1e-6 ? brightness(degree: lower + 1, columns: columns, rows: rows, size: size) : below
-
-        var pixels = [UInt8](repeating: 0, count: columns * rows * 4)
-        for row in 0..<rows {
-            // Image rows run from the top; grid rows from the hinge.
-            let imageRow = rows - 1 - row
-            for column in 0..<columns {
-                let index = row * columns + column
-                let kept = below[index] + (above[index] - below[index]) * mix
-                // The light lost is a share of linear light, but the window
-                // server blends the black over encoded values, so the share
-                // goes in through the display's transfer curve.
-                let alpha = state.darkness * (1 - pow(max(kept, 0), 1 / 2.2))
-                pixels[(imageRow * columns + column) * 4 + 3] = UInt8((min(max(alpha, 0), 1) * 255).rounded())
-            }
-        }
-        let image = pixels.withUnsafeMutableBytes { bytes -> CGImage? in
-            CGContext(
-                data: bytes.baseAddress,
-                width: columns,
-                height: rows,
-                bitsPerComponent: 8,
-                bytesPerRow: columns * 4,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-            )?.makeImage()
-        }
-        guard let image else { return nil }
-        let cellWidth = Double(size.width) / Double(columns - 1)
-        let cellHeight = Double(size.height) / Double(rows - 1)
-        let frame = CGRect(
-            x: -cellWidth / 2,
-            y: -cellHeight / 2,
-            width: Double(size.width) + cellWidth,
-            height: Double(size.height) + cellHeight
-        )
-        return (image, frame)
-    }
-
-    private func brightness(degree: Int, columns: Int, rows: Int, size: CGSize) -> [Double] {
-        if let cached = brightnessCache[degree] { return cached }
-        let grid = FrostedGlass.brightnessGrid(
-            lift: Double(degree) * .pi / 180,
-            width: Double(size.width),
-            height: Double(size.height),
-            columns: columns,
-            rows: rows
-        )
-        brightnessCache[degree] = grid
-        return grid
     }
 }

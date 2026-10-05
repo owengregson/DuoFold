@@ -20,12 +20,10 @@
 "Look" = "Look";
 "Blur" = "Blur";
 "Blur radius at the far edge." = "Blur radius at the far edge.";
-"How frosted the glass is. 100% is tracing paper." = "How frosted the glass is. 100% is tracing paper.";
 "Blur spread" = "Blur spread";
 "0 blurs the far edge only, 100 the whole picture." = "0 blurs the far edge only, 100 the whole picture.";
 "Dimming" = "Dimming";
 "How dark the far edge goes." = "How dark the far edge goes.";
-"How much of the light the lifted glass loses shows as dark." = "How much of the light the lifted glass loses shows as dark.";
 "Dimming spread" = "Dimming spread";
 "Everything above this height goes fully dark." = "Everything above this height goes fully dark.";
 "Perspective" = "Perspective";

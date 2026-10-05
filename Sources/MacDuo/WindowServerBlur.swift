@@ -29,7 +29,10 @@ enum WindowServerBlur {
     /// for radii of 2 to 24 points, against 1.18 for a Gaussian of sigma
     /// `radius`, and keeps 0.11, 0.58 and 0.77 of it at periods of 3, 6 and 9
     /// radii, against 0.11, 0.58 and 0.78. The radius is in layer points: a
-    /// tree drawn at twice the scale blurs twice as many pixels.
+    /// tree drawn at twice the scale blurs twice as many pixels. Drawn at
+    /// twice the scale, as on a Retina screen, an edge behind a band spreads
+    /// by a sigma of 0.90 to 0.99 radii for radii of 2 to 107 points, the
+    /// widest blur the settings reach.
     static let sigmaPerRadius = 1.0
 
     /// Whether the window server can draw the frosted glass on this system.
