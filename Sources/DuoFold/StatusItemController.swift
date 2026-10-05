@@ -5,7 +5,7 @@ import SwiftUI
 /// The menu bar item and the settings popover, and the panel that holds the
 /// settings when the item is hidden.
 @MainActor
-final class StatusItemController: NSObject, NSPopoverDelegate {
+final class StatusItemController: NSObject, NSPopoverDelegate, NSWindowDelegate {
 
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
@@ -103,6 +103,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         }
         NSApp.activate()
         panel.makeKeyAndOrderFront(nil)
+        controller.isPanelOpen = true
     }
 
     private func makePanel() -> NSPanel {
@@ -121,6 +122,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = .moveToActiveSpace
         panel.isReleasedWhenClosed = false
+        panel.delegate = self
         let settings = makeSettingsController()
         panel.contentViewController = settings
         // Otherwise the panel takes the size of the settings only once it is
@@ -202,13 +204,18 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         }
     }
 
-    // The panel shows the live angle, which needs the sensor read while it
-    // is open.
+    // The settings show the live angle, which needs the sensor read while
+    // they are open, in the popover or the panel.
     func popoverWillShow(_ notification: Notification) {
         controller.isPanelOpen = true
     }
 
     func popoverDidClose(_ notification: Notification) {
         controller.isPanelOpen = false
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard (notification.object as? NSPanel) === panel else { return }
+        controller.isPanelOpen = popover.isShown
     }
 }
