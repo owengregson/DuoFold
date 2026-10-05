@@ -442,6 +442,9 @@ final class DepthOverlay {
         }
     }
 
+    /// How many times the glass has been laid out afresh, for the log.
+    var glassChanges: Int { glassView?.changes ?? 0 }
+
     /// Has the window server draw the whole glass again, for a frame that
     /// changes nothing of it (`FrostedGlassView.refresh`).
     func refreshGlass() {

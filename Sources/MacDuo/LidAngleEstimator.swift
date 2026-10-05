@@ -339,6 +339,14 @@ struct LidAngleEstimator {
             state.z
         )
         covariance.predict(dt: dt, memory: tuning.memory)
+        // Forgetting multiplies the covariance by up to e^33 after a long
+        // gap, and rounding at such sizes has been seen to leave it negative,
+        // once 10^168 with no acceleration left: the update then takes no
+        // reading in, ever, and the angle runs off. A covariance that is not
+        // one any more knows nothing, so it starts over from knowing nothing.
+        if !covariance.isSound {
+            covariance = Covariance(diagonal: SIMD3(100, Self.unknownSpeed * Self.unknownSpeed, Self.unknownAcceleration * Self.unknownAcceleration))
+        }
         stateTime += dt
 
         let r = measurementVariance(timingVariance: timingVariance, speed: state.y)
@@ -556,6 +564,15 @@ private struct Covariance {
 
     /// Carries the covariance `dt` ahead at constant acceleration, and fades
     /// it so that older readings count for less.
+    /// Finite, positive on the diagonal, and no larger than forgetting
+    /// leaves it: what a covariance is, and rounding can undo.
+    var isSound: Bool {
+        let all = [aa, av, ac, vv, vc, cc]
+        return all.allSatisfy(\.isFinite) && aa > 0 && vv > 0 && cc > 0
+            && aa < 1e30 && vv < 1e30 && cc < 1e30
+            && av * av <= aa * vv * (1 + 1e-6) && ac * ac <= aa * cc * (1 + 1e-6) && vc * vc <= vv * cc * (1 + 1e-6)
+    }
+
     mutating func predict(dt: TimeInterval, memory: TimeInterval) {
         let h = dt * dt / 2
         // F P Fᵀ, with F = [[1, dt, h], [0, 1, dt], [0, 0, 1]].

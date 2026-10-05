@@ -78,6 +78,8 @@ final class FrostedGlassView: NSView {
     /// Black past the margin.
     private let surround = CAShapeLayer()
     private var lastState: State?
+    /// How many times `apply` has laid the glass out afresh, for the log.
+    private(set) var changes = 0
 
     private struct State: Equatable {
         var progress: Double
@@ -186,6 +188,7 @@ final class FrostedGlassView: NSView {
         lean.screenSize = size
         let state = State(progress: min(max(progress, 0), 1), tuning: tuning, gradient: gradient, size: size, lean: lean, backsWithScreen: backsWithScreen)
         guard state != lastState else { return }
+        changes += 1
         lastState = state
 
         CATransaction.begin()
