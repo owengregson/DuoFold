@@ -96,9 +96,9 @@ final class ScreenStreamer {
     private var consumedID: UInt64 = 0
     private var lastHandOver: CFTimeInterval = 0
 
-    /// Frames are handed over no faster than this. A starting stream delivers
-    /// a burst well above its asked for rate.
-    private static let minimumHandOverInterval: TimeInterval = 1.0 / 32
+    /// Frames are handed over no faster than a little above the rate the
+    /// stream asked for. A starting stream delivers a burst well above it.
+    private var minimumHandOverInterval: TimeInterval = 1.0 / 32
 
     private(set) var isStarted = false
     private(set) var screen: NSScreen?
@@ -152,7 +152,7 @@ final class ScreenStreamer {
     /// since the last call.
     func newFrame() -> CapturedFrame? {
         let now = CACurrentMediaTime()
-        guard now - lastHandOver >= Self.minimumHandOverInterval else { return nil }
+        guard now - lastHandOver >= minimumHandOverInterval else { return nil }
         guard let latest = receiver?.latest(), latest.id != consumedID else { return nil }
         consumedID = latest.id
         lastHandOver = now
@@ -174,7 +174,13 @@ final class ScreenStreamer {
             let configuration = SCStreamConfiguration()
             configuration.width = Int(activeFilter.contentRect.width * CGFloat(activeFilter.pointPixelScale))
             configuration.height = Int(activeFilter.contentRect.height * CGFloat(activeFilter.pointPixelScale))
-            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+            // As often as the screen refreshes, 120 a second on ProMotion, so
+            // moving content under the effect keeps up with it. Only a frame
+            // whose pixels changed is taken, so a still screen costs nothing
+            // more; each one rebuilds the blur stack, about 0.7 ms of GPU on
+            // an M5.
+            let frameRate = max(target.maximumFramesPerSecond, 30)
+            configuration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(frameRate))
             configuration.pixelFormat = kCVPixelFormatType_32BGRA
             configuration.colorSpaceName = Self.colourSpaceName
             configuration.showsCursor = false
@@ -200,9 +206,10 @@ final class ScreenStreamer {
             self.receiver = receiver
             self.stream = fresh
             self.screen = target
+            minimumHandOverInterval = 15 / (16 * Double(frameRate))
             Diagnostics.geometry.notice(
                 """
-                stream started \(configuration.width)x\(configuration.height) px in \
+                stream started \(configuration.width)x\(configuration.height) px at up to \(frameRate) fps in \
                 \((CFAbsoluteTimeGetCurrent() - started) * 1000, format: .fixed(precision: 1)) ms
                 """
             )

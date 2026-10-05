@@ -30,9 +30,9 @@ final class DepthRenderer {
         var extent: SIMD4<Float>
         var light: SIMD4<Float>
 
-        /// Close enough that the frame would look the same. The spring that
-        /// eases the angle approaches its target without reaching it, and
-        /// redrawing for a hundredth of a pixel only costs power.
+        /// Close enough that the frame would look the same. An eased angle
+        /// approaches its target without reaching it, and redrawing for a
+        /// hundredth of a pixel only costs power.
         func matches(_ other: Uniforms) -> Bool {
             func near(_ a: SIMD4<Float>, _ b: SIMD4<Float>) -> Bool {
                 let tolerance = max(abs(a), abs(b)) * 2e-6 + 1e-7
