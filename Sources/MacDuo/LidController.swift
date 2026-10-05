@@ -86,12 +86,6 @@ final class LidController: ObservableObject {
     /// Set when a lid held shut ended the run: the lid opening brings it
     /// back at full strength.
     private var opensFromShut = false
-    /// The live frame the run a shut lid ended last drew, to draw it again
-    /// the moment the lid opens, before any new frame can be captured.
-    private var shutFrame: CapturedFrame?
-    /// The frame `presentPicture` starts the picture from, while a run comes
-    /// back from shut.
-    private var reopeningFrame: CapturedFrame?
     private lazy var clamshellWatch = LidClamshellWatch { [weak self] isShut in
         MainActor.assumeIsolated {
             guard !isShut else { return }
@@ -307,7 +301,6 @@ final class LidController: ObservableObject {
         preview = nil
         isActive = false
         opensFromShut = false
-        shutFrame = nil
         endHaptics()
         updateEscapeKey()
     }
@@ -681,32 +674,29 @@ final class LidController: ObservableObject {
     }
 
     /// Ends a run on a lid held shut: the screen is dark, so nothing of it
-    /// need go on, not the picture, the capture, the frames or the polling.
-    /// The lid opening brings it back (`reopenFromShut`), from the frame it
-    /// last drew, kept for that.
+    /// need go on, not the picture, the capture, the frames or the polling,
+    /// and nothing of it is left over the screen, which a remote session can
+    /// still be using. The lid opening brings it back (`reopenFromShut`).
     private func endShut() {
         Diagnostics.lid.notice("end: lid held shut, raw \(self.rawAngle, format: .fixed(precision: 2))")
-        let frame = capturesScreen ? overlay.heldFrame : nil
         setActive(false)
         snapshotter.endPrewarm()
         streamer.stop()
         overlay.discardLive()
-        shutFrame = frame
         opensFromShut = true
     }
 
     /// Brings back, at full strength, a run that a shut lid ended. macOS
     /// lights the screen as it reports the lid open, before a reading of
-    /// ours can show the lid moving, so the run goes up then, as the lid
-    /// was when it shut: the glass at once, and the last frame drawn again
-    /// as the picture, leaning, both before the screen lights. The capture
-    /// starts again under it, and the picture follows the lid out from the
-    /// readings that come.
+    /// ours can show the lid moving, so the run goes up then, as the lid was
+    /// when it shut. The glass goes up at once: it shows the screen as it is
+    /// now, where anything captured before the lid shut may be out of date,
+    /// a remote session having used the screen meanwhile. The captured
+    /// picture takes over on the capture's first new frame, and follows the
+    /// lid out from the readings that come.
     private func reopenFromShut(cause: StaticString) {
         guard opensFromShut, !isActive, preferences.isEnabled, !isSuspended else { return }
         opensFromShut = false
-        let frame = shutFrame
-        shutFrame = nil
         // A lid found already past the start angle has nothing to unwind.
         guard rawAngle < effectiveThreshold else { return }
         Diagnostics.lid.notice("reopen: \(cause), raw \(self.rawAngle, format: .fixed(precision: 2))")
@@ -714,9 +704,7 @@ final class LidController: ObservableObject {
         // run again before a reading shows the lid open.
         shutHold.reset()
         if preview == nil { estimator.resume(at: CACurrentMediaTime()) }
-        reopeningFrame = frame
         setActive(true)
-        reopeningFrame = nil
         // Drawn now, not at the next refresh, which may not come before the
         // screen lights.
         applyVisual(angle: rawAngle)
@@ -846,12 +834,7 @@ final class LidController: ObservableObject {
                 return
             }
             startDisplayLink()
-            if let frame = reopeningFrame {
-                // Up with the glass, before the screen lights: nothing to
-                // ease the lean in from.
-                Diagnostics.lid.notice("present: live, from the frame the lid shut on")
-                overlay.absorb(frame, easesLean: false)
-            } else if let frame = streamer.newFrame() {
+            if let frame = streamer.newFrame() {
                 Diagnostics.lid.notice("present: live, a stream frame was ready")
                 overlay.absorb(frame)
             } else if !plan.seedsFromScreenshot {
