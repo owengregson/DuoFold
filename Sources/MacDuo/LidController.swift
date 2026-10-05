@@ -83,8 +83,8 @@ final class LidController: ObservableObject {
     private var isCapturePending = false
     private var openDwell = LidOpenDwell()
     private var shutHold = LidShutHold()
-    /// True while a run's picture is down on a lid held shut. The run is
-    /// still on, so the picture goes back up as the lid opens.
+    /// True while a run waits out a lid held shut, its picture left as
+    /// last drawn.
     private var isParked = false
     /// Where the lid last moved to by more than `timeoutMovementThreshold`,
     /// and when. The timeout counts from there.
@@ -653,6 +653,12 @@ final class LidController: ObservableObject {
             if isParked {
                 isParked = false
                 Diagnostics.lid.notice("unpark: lid opening, raw \(angle, format: .fixed(precision: 2))")
+                // The picture stood at full strength, as the lid still is short
+                // of the full-effect angle, so the picture joins the readings
+                // at once rather than blending out from where the lid rested.
+                if let estimate = estimator.latest?.angle, ramp.progress(at: estimate) >= 1 {
+                    estimator.rejoin(at: CACurrentMediaTime())
+                }
             }
             if capturesScreen, preferences.isLivePicture { streamer.start() }
             if !overlay.isVisible, !isCapturePending { presentPicture() }
@@ -665,22 +671,21 @@ final class LidController: ObservableObject {
         }
     }
 
-    /// Takes a run's picture down while the lid stays shut: the screen is
-    /// dark, and the capture would run on for nothing. The run stays on,
-    /// held at full strength, so the picture goes back up as the lid opens
-    /// and follows it out.
+    /// Lets a run on a lid held shut rest: the screen is dark, so the
+    /// capture and the frames would run on for nothing. The picture stays up
+    /// as last drawn, at full strength, lean and all, and costs nothing until
+    /// the screen lights. Left up, it is in the very first frame the screen
+    /// lights with as the lid opens, before any reading has woken the app,
+    /// which takes until the lid is several degrees open. The capture then
+    /// starts again into the same picture, and at full strength a frame from
+    /// before the lid shut cannot be told from a new one.
     private func park() {
         guard !isParked else { return }
         isParked = true
         Diagnostics.lid.notice("park: lid held shut, raw \(self.rawAngle, format: .fixed(precision: 2))")
-        pictureTask?.cancel()
-        pictureTask = nil
-        isCapturePending = false
         stopDisplayLink()
-        overlay.dismiss(animated: false)
         snapshotter.endPrewarm()
         streamer.stop()
-        overlay.discardLive()
         updateEscapeKey()
     }
 
