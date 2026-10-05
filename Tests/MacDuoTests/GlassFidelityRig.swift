@@ -27,7 +27,7 @@ struct GlassFidelityRig {
     let scale: CGFloat
     let picture: CGImage
     private let device: MTLDevice
-    private let queue: MTLCommandQueue
+    fileprivate let queue: MTLCommandQueue
 
     init?(screen: CGSize, scale: CGFloat) {
         guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue(),
@@ -87,6 +87,55 @@ struct GlassFidelityRig {
         return render(root)
     }
 
+    /// A renderer kept across frames, so later frames can redraw only part
+    /// of the screen, as the window server does when something changes.
+    @MainActor
+    final class LiveRenderer {
+        let renderer: CARenderer
+        let host = CALayer()
+        let target: MTLTexture
+        let rig: GlassFidelityRig
+
+        init?(rig: GlassFidelityRig, root: CALayer) {
+            guard let target = rig.makeTarget(format: .bgra8Unorm) else { return nil }
+            self.rig = rig
+            self.target = target
+            renderer = CARenderer(mtlTexture: target, options: [
+                kCARendererColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
+                kCARendererMetalCommandQueue: rig.queue,
+            ])
+            host.anchorPoint = .zero
+            host.frame = CGRect(x: 0, y: 0, width: CGFloat(rig.pixelWidth), height: CGFloat(rig.pixelHeight))
+            host.sublayerTransform = CATransform3DMakeScale(rig.scale, rig.scale, 1)
+            host.addSublayer(root)
+            renderer.layer = host
+            renderer.bounds = host.frame
+        }
+
+        /// One frame, redrawing only `update`, in screen points from the
+        /// bottom left, or everything.
+        func frame(update: CGRect? = nil) -> Frame? {
+            CATransaction.flush()
+            renderer.beginFrame(atTime: CACurrentMediaTime(), timeStamp: nil)
+            let rect = update.map {
+                CGRect(x: $0.minX * rig.scale, y: $0.minY * rig.scale, width: $0.width * rig.scale, height: $0.height * rig.scale)
+            } ?? renderer.bounds
+            renderer.addUpdate(rect)
+            renderer.render()
+            renderer.endFrame()
+            guard let fence = rig.queue.makeCommandBuffer() else { return nil }
+            fence.commit()
+            fence.waitUntilCompleted()
+            var frame = rig.read(target)
+            let row = rig.pixelWidth * 4
+            for y in 0..<rig.pixelHeight / 2 {
+                let top = y * row, bottom = (rig.pixelHeight - 1 - y) * row
+                for i in 0..<row { frame.pixels.swapAt(top + i, bottom + i) }
+            }
+            return frame
+        }
+    }
+
     /// Renders a layer tree the way the window server would, into 8-bit sRGB.
     func render(_ root: CALayer) -> Frame? {
         guard let target = makeTarget(format: .bgra8Unorm) else { return nil }
@@ -123,7 +172,7 @@ struct GlassFidelityRig {
         return frame
     }
 
-    private func makeTarget(format: MTLPixelFormat) -> MTLTexture? {
+    fileprivate func makeTarget(format: MTLPixelFormat) -> MTLTexture? {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: format, width: pixelWidth, height: pixelHeight, mipmapped: false
         )
@@ -132,7 +181,7 @@ struct GlassFidelityRig {
         return device.makeTexture(descriptor: descriptor)
     }
 
-    private func read(_ texture: MTLTexture) -> Frame {
+    fileprivate func read(_ texture: MTLTexture) -> Frame {
         var pixels = [UInt8](repeating: 0, count: pixelWidth * pixelHeight * 4)
         texture.getBytes(&pixels, bytesPerRow: pixelWidth * 4,
                          from: MTLRegionMake2D(0, 0, pixelWidth, pixelHeight), mipmapLevel: 0)
