@@ -295,9 +295,6 @@ final class DepthRenderer {
         return true
     }
 
-    /// The live frame the picture is drawn from, if it is one.
-    var heldFrame: CapturedFrame? { pictureFrame }
-
     /// Takes one live frame. The stack is rebuilt on the same command buffer
     /// as the frame that draws it.
     func absorb(_ frame: CapturedFrame) {
