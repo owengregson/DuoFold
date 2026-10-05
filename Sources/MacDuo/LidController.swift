@@ -164,9 +164,9 @@ final class LidController: ObservableObject {
         let startedAt: CFTimeInterval
         let open: Double
         let shut: Double
-        let closing: CFTimeInterval = 1.4
-        let hold: CFTimeInterval = 0.8
-        let opening: CFTimeInterval = 0.6
+        var closing: CFTimeInterval = 1.4
+        var hold: CFTimeInterval = 0.8
+        var opening: CFTimeInterval = 0.6
 
         /// `nil` once the run is over.
         func angle(at now: CFTimeInterval) -> Double? {
@@ -234,6 +234,16 @@ final class LidController: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.runPreview() }
+        }
+        // The same sweep held at a strength, its object, for a while: long
+        // enough to look at, or to take a screenshot of.
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("to.maki.MacDuo.preview.hold"),
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            let progress = (note.object as? String).flatMap(Double.init) ?? 1
+            MainActor.assumeIsolated { self?.runPreview(holdingAt: progress) }
         }
         // The glass captures nothing, so it never touches ScreenCaptureKit
         // and never asks for Screen Recording.
@@ -315,12 +325,14 @@ final class LidController: ObservableObject {
     }
 
     /// Plays the effect once on the current screen contents.
-    func runPreview() {
+    /// - Parameter progress: a strength to stop at and hold for
+    ///   `previewHold`, rather than sweeping past full strength and back.
+    func runPreview(holdingAt progress: Double? = nil) {
         guard preferences.isEnabled, !isSuspended, preview == nil, !isActive else { return }
         // Well above the trigger angle, so the sweep runs the pre-warm the way
         // a real close does.
         let threshold = effectiveThreshold
-        preview = PreviewRun(
+        var run = PreviewRun(
             startedAt: CACurrentMediaTime(),
             open: max(
                 threshold + preferences.hysteresis + 5,
@@ -328,8 +340,19 @@ final class LidController: ObservableObject {
             ),
             shut: max(threshold - preferences.blurSpan * 1.15, 5)
         )
+        if let progress {
+            run = PreviewRun(
+                startedAt: run.startedAt,
+                open: run.open,
+                shut: threshold - min(max(progress, 0), 1) * preferences.blurSpan,
+                hold: Self.previewHold
+            )
+        }
+        preview = run
         wake()
     }
+
+    private static let previewHold: CFTimeInterval = 12
 
     /// Ends the run at once. The settings panel is under the picture, and a
     /// lid or sensor that will not read back past the start angle would
