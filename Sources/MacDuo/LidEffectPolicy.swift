@@ -204,3 +204,30 @@ struct LidEffectPolicy {
             && predictedAngle <= threshold
     }
 }
+
+/// How far into the effect the lid is: from the start angle down to
+/// `span` degrees further closed, where it reaches full strength.
+struct LidEffectRamp {
+    let startAngle: Double
+    let span: Double
+
+    init(startAngle: Double, span: Double) {
+        self.startAngle = startAngle
+        // No span at all would leave nothing to ramp over.
+        self.span = max(span, 1)
+    }
+
+    var fullEffectAngle: Double { startAngle - span }
+
+    /// 0 at the start angle and above, 1 at the full-effect angle and below.
+    func progress(at angle: Double) -> Double {
+        min(max((startAngle - angle) / span, 0), 1)
+    }
+
+    /// The angle the picture is drawn at. Past full strength it holds there,
+    /// so the picture stops leaning back when the blur and dimming stop
+    /// growing, rather than stretching on until the lid shuts.
+    func pictureAngle(for angle: Double) -> Double {
+        max(angle, fullEffectAngle)
+    }
+}
