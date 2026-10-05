@@ -5,6 +5,9 @@ import Foundation
 /// `blurPass` builds the blur stack: one weighted sum of linear samples per
 /// pixel, with the taps worked out on the CPU (see `BlurStack`).
 ///
+/// `cornerFragment` blackens the picture's rounded top corners before the
+/// stack is built from it (`ScreenCorner`), so they blur with the rest.
+///
 /// `depthFragment` draws the frame. Each screen pixel maps back into the
 /// picture through the inverse perspective, then blends the two stack levels
 /// that bracket the blur wanted there. Where there is almost no blur it reads
@@ -271,6 +274,35 @@ enum DepthShaders {
         float noise = fract(52.9829189 * fract(dot(position.xy, float2(0.06711056, 0.00583715))));
         float3 step = max(2.2 * sqrt(linearColour), 1.0 / 12.92) * (0.6 / 255.0);
         return half4(half3(max(linearColour + (noise - 0.5) * step, 0.0)), 1.0h);
+    }
+
+    struct CornerVertex {
+        float4 position [[position]];
+        float2 cap;
+    };
+
+    // Two quads over the picture's top-left and top-right corner boxes, each
+    // reading the cap with the picture's corner at (0, 0), x running inward
+    // and y down. `box` is a box's size in clip space.
+    vertex CornerVertex cornerVertex(uint vertexID [[vertex_id]],
+                                     constant float2 &box [[buffer(0)]]) {
+        const float2 unit[6] = {
+            float2(0.0, 0.0), float2(1.0, 0.0), float2(0.0, 1.0),
+            float2(1.0, 0.0), float2(1.0, 1.0), float2(0.0, 1.0)
+        };
+        float2 cap = unit[vertexID % 6u];
+        float x = vertexID < 6u ? -1.0 + cap.x * box.x : 1.0 - cap.x * box.x;
+        CornerVertex out;
+        out.position = float4(x, 1.0 - cap.y * box.y, 0.0, 1.0);
+        out.cap = cap;
+        return out;
+    }
+
+    // Black, as much as the cap covers; blended over the picture.
+    fragment float4 cornerFragment(CornerVertex in [[stage_in]],
+                                   texture2d<float> cap [[texture(0)]]) {
+        constexpr sampler capSampler(filter::linear, address::clamp_to_edge);
+        return float4(0.0, 0.0, 0.0, cap.sample(capSampler, in.cap).r);
     }
     """
 }

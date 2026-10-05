@@ -46,6 +46,12 @@ struct GlassLean: Equatable {
         )
     }
 
+    /// From screen points back to picture points: `screenPoint` undone, for
+    /// a point `p` as `m * (p.x, p.y, 1)` over its third component.
+    var screenToPicture: simd_double3x3 {
+        matrix.inverse
+    }
+
     /// Where a picture point lands on screen. Points of the margin land past
     /// the picture's corners, as the captured picture's margin does.
     func screenPoint(_ point: CGPoint) -> CGPoint {

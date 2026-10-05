@@ -63,6 +63,8 @@ final class DepthRenderer {
     nonisolated private let queue: MTLCommandQueue
     nonisolated private let blurStack: BlurStack
     nonisolated private let pipeline: MTLRenderPipelineState
+    /// Blackens the picture's rounded top corners (`encodeCorners`).
+    nonisolated private let cornerPipeline: MTLRenderPipelineState
 
     /// The sharp picture the next frame reads, and the stack built from it.
     private var picture: MTLTexture?
@@ -78,6 +80,11 @@ final class DepthRenderer {
     private var liveStack: BlurStack.Textures?
     /// Holds a seed picture until the stream's first frame replaces it.
     private var seedTexture: MTLTexture?
+    /// The live picture's top corner radius, in points.
+    private var liveCornerRadius = 0.0
+    /// Each live frame, copied so its corners can be blackened: the capture
+    /// surface itself is the stream's.
+    private var liveCopy: MTLTexture?
     private var isLiveSource = false
     /// The newest live frame, waiting for the next drawn frame to take it.
     private var pendingFrame: CapturedFrame?
@@ -106,6 +113,19 @@ final class DepthRenderer {
             descriptor.fragmentFunction = library.makeFunction(name: "depthFragment")
             descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm_srgb
             pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+            let corners = MTLRenderPipelineDescriptor()
+            corners.vertexFunction = library.makeFunction(name: "cornerVertex")
+            corners.fragmentFunction = library.makeFunction(name: "cornerFragment")
+            let attachment = corners.colorAttachments[0]!
+            attachment.pixelFormat = .bgra8Unorm_srgb
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .zero
+            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+            attachment.alphaBlendOperation = .add
+            attachment.sourceAlphaBlendFactor = .zero
+            attachment.destinationAlphaBlendFactor = .one
+            cornerPipeline = try device.makeRenderPipelineState(descriptor: corners)
             guard let blurStack = BlurStack(device: device, library: library) else {
                 Diagnostics.geometry.error("metal blur pipeline failed")
                 return nil
@@ -162,7 +182,12 @@ final class DepthRenderer {
 
     /// Uploads the picture and builds its blur stack. Call this off the main
     /// thread.
-    nonisolated func makePicture(image: CGImage, screenSize: CGSize, pixelScale: CGFloat) -> PreparedPicture? {
+    ///
+    /// - Parameter cornerRadius: the panel's top corner radius, in points,
+    ///   which the picture keeps as it leans (`ScreenCorner`).
+    nonisolated func makePicture(
+        image: CGImage, screenSize: CGSize, pixelScale: CGFloat, cornerRadius: Double = 0
+    ) -> PreparedPicture? {
         let started = CFAbsoluteTimeGetCurrent()
         guard let layout = Self.layout(screenSize: screenSize, pixelScale: pixelScale) else { return nil }
         let width = layout.pictureWidth
@@ -207,6 +232,7 @@ final class DepthRenderer {
             destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
         )
         blit.endEncoding()
+        encodeCorners(radius: cornerRadius, pixelScale: pixelScale, on: texture, into: commands)
         blurStack.encode(from: texture, into: commands, textures: stackTextures)
         commands.commit()
         commands.waitUntilCompleted()
@@ -236,9 +262,52 @@ final class DepthRenderer {
             height: height,
             mipmapped: false
         )
-        descriptor.usage = [.shaderRead]
+        // A render target too, for `encodeCorners`.
+        descriptor.usage = [.shaderRead, .renderTarget]
         descriptor.storageMode = .private
         return device.makeTexture(descriptor: descriptor)
+    }
+
+    /// Blackens the picture's rounded top corners in `picture`, which covers
+    /// the screen at `pixelScale`, so the stack built from it blurs them as
+    /// it blurs the black margin.
+    nonisolated private func encodeCorners(
+        radius: Double, pixelScale: CGFloat, on picture: MTLTexture, into commands: MTLCommandBuffer
+    ) {
+        guard radius > 0, let cap = makeCapTexture(radius: radius, pixelScale: pixelScale) else { return }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = picture
+        pass.colorAttachments[0].loadAction = .load
+        pass.colorAttachments[0].storeAction = .store
+        guard let encoder = commands.makeRenderCommandEncoder(descriptor: pass) else { return }
+        var box = SIMD2<Float>(
+            Float(2 * Double(cap.width) / Double(picture.width)),
+            Float(2 * Double(cap.height) / Double(picture.height))
+        )
+        encoder.setRenderPipelineState(cornerPipeline)
+        encoder.setVertexBytes(&box, length: MemoryLayout<SIMD2<Float>>.stride, index: 0)
+        encoder.setFragmentTexture(cap, index: 0)
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 12)
+        encoder.endEncoding()
+    }
+
+    /// The top-left corner's cap (`ScreenCorner.capPath`) as coverage, the
+    /// corner in the first row and column.
+    nonisolated private func makeCapTexture(radius: Double, pixelScale: CGFloat) -> MTLTexture? {
+        let side = Int((ScreenCorner.boxSide(radius: radius) * Double(pixelScale)).rounded(.up))
+        guard side > 0, let context = CGContext(
+            data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side,
+            space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ), let pixels = context.data else { return nil }
+        context.scaleBy(x: pixelScale, y: pixelScale)
+        context.addPath(ScreenCorner.capPath(radius: radius))
+        context.setFillColor(gray: 1, alpha: 1)
+        context.fillPath()
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: side, height: side, mipmapped: false)
+        descriptor.usage = [.shaderRead]
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+        texture.replace(region: MTLRegionMake2D(0, 0, side, side), mipmapLevel: 0, withBytes: pixels, bytesPerRow: side)
+        return texture
     }
 
     // MARK: - Live source
@@ -246,7 +315,7 @@ final class DepthRenderer {
     /// Prepares the stack for a live stream. Nothing is drawn until the first
     /// frame lands.
     @discardableResult
-    func beginLive(screenSize: CGSize, pixelScale: CGFloat) -> Bool {
+    func beginLive(screenSize: CGSize, pixelScale: CGFloat, cornerRadius: Double = 0) -> Bool {
         guard let layout = Self.layout(screenSize: screenSize, pixelScale: pixelScale) else { return false }
         if liveStack?.layout != layout {
             guard let fresh = blurStack.makeTextures(for: layout) else { return false }
@@ -258,6 +327,7 @@ final class DepthRenderer {
         pictureFrame = nil
         stack = nil
         isLiveSource = true
+        liveCornerRadius = cornerRadius
         self.screenSize = screenSize
         self.pixelScale = pixelScale
         needsDraw = true
@@ -308,8 +378,16 @@ final class DepthRenderer {
         guard isLiveSource, let liveStack else { return }
         pendingFrame = frame
         pendingSeed = nil
-        // The surface is read in place, with no copy.
+        // The surface is read in place, with no copy, unless the corners
+        // need blackening.
         picture = frame.texture
+        if liveCornerRadius > 0 {
+            let source = frame.texture
+            if liveCopy?.width != source.width || liveCopy?.height != source.height {
+                liveCopy = makePictureTexture(width: source.width, height: source.height)
+            }
+            if let liveCopy { picture = liveCopy }
+        }
         pictureFrame = frame
         stack = liveStack
     }
@@ -319,7 +397,14 @@ final class DepthRenderer {
     private func absorbPending(into commands: MTLCommandBuffer) {
         guard let liveStack, pendingFrame != nil || pendingSeed != nil else { return }
         if let frame = pendingFrame {
-            blurStack.encode(from: frame.texture, into: commands, textures: liveStack)
+            if liveCornerRadius > 0, let liveCopy, let blit = commands.makeBlitCommandEncoder() {
+                blit.copy(from: frame.texture, to: liveCopy)
+                blit.endEncoding()
+                encodeCorners(radius: liveCornerRadius, pixelScale: pixelScale, on: liveCopy, into: commands)
+                blurStack.encode(from: liveCopy, into: commands, textures: liveStack)
+            } else {
+                blurStack.encode(from: frame.texture, into: commands, textures: liveStack)
+            }
         } else if let seed = pendingSeed, let seedTexture,
                   let blit = commands.makeBlitCommandEncoder() {
             blit.copy(
@@ -334,6 +419,7 @@ final class DepthRenderer {
                 destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
             )
             blit.endEncoding()
+            encodeCorners(radius: liveCornerRadius, pixelScale: pixelScale, on: seedTexture, into: commands)
             blurStack.encode(from: seedTexture, into: commands, textures: liveStack)
         }
         pendingFrame = nil
@@ -352,6 +438,7 @@ final class DepthRenderer {
         isLiveSource = false
         liveStack = nil
         seedTexture = nil
+        liveCopy = nil
     }
 
     // MARK: - Still source

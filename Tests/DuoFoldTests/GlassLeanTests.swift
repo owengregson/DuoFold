@@ -88,9 +88,11 @@ struct GlassLeanTests {
         #expect(profile.first!.opacity < 1e-4 && profile.last!.opacity > 1 - 1e-2)
         #expect(abs(profile[profile.count / 2].opacity - (1 - pow(0.5, 1 / 2.2))) < 1e-12)
         for (a, b) in zip(profile, profile.dropFirst()) { #expect(b.opacity > a.opacity) }
-        // One sigma inside, a Gaussian has 84.1% of itself on the picture.
+        // One skirt sigma inside, the skirt has 84.1% of itself on the
+        // picture and the core, four of its sigmas in, all but 0.003%.
         let oneInside = profile.min { abs($0.position - 0.375) < abs($1.position - 0.375) }!
-        #expect(abs(oneInside.position - 0.375) < 1e-9 && abs(oneInside.opacity - (1 - pow(0.8413, 1 / 2.2))) < 1e-4)
+        let kept = (1 - FrostedGlassView.outlineSkirt) * 0.99997 + FrostedGlassView.outlineSkirt * 0.84134
+        #expect(abs(oneInside.position - 0.375) < 1e-9 && abs(oneInside.opacity - (1 - pow(kept, 1 / 2.2))) < 1e-4)
     }
 
     @Test

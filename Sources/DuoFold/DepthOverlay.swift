@@ -190,7 +190,9 @@ final class DepthOverlay {
         screenSize = screen.frame.size
 
         let pixelScale = Double(screen.backingScaleFactor)
-        guard renderer.beginLive(screenSize: screenSize, pixelScale: CGFloat(pixelScale)) else {
+        guard renderer.beginLive(
+            screenSize: screenSize, pixelScale: CGFloat(pixelScale), cornerRadius: ScreenCorner.radius(of: screen)
+        ) else {
             restoreGlassFromBridge()
             return false
         }
@@ -265,7 +267,8 @@ final class DepthOverlay {
         }
         let view = FrostedGlassView(
             frame: NSRect(origin: .zero, size: screen.frame.size),
-            scale: screen.backingScaleFactor
+            scale: screen.backingScaleFactor,
+            cornerRadius: ScreenCorner.radius(of: screen)
         )
         view.autoresizingMask = [.width, .height]
         let window = makeOverlayWindow(on: screen, contentView: view)
@@ -335,9 +338,12 @@ final class DepthOverlay {
         buildToken += 1
         let token = buildToken
         let size = screenSize
+        let cornerRadius = ScreenCorner.radius(of: screen)
         buildQueue.async { [weak self, weak renderer] in
             guard let renderer else { return }
-            let picture = renderer.makePicture(image: image, screenSize: size, pixelScale: CGFloat(pixelScale))
+            let picture = renderer.makePicture(
+                image: image, screenSize: size, pixelScale: CGFloat(pixelScale), cornerRadius: cornerRadius
+            )
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self, self.buildToken == token, self.window === window,

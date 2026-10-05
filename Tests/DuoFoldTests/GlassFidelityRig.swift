@@ -29,6 +29,29 @@ struct GlassFidelityRig {
     private let device: MTLDevice
     fileprivate let queue: MTLCommandQueue
 
+    /// Over a picture of the caller's.
+    init?(screen: CGSize, scale: CGFloat, picture: CGImage) {
+        guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else { return nil }
+        self.screen = screen
+        self.scale = scale
+        self.picture = picture
+        self.device = device
+        self.queue = queue
+    }
+
+    /// One shade of gray over the whole screen.
+    static func plainPicture(size: CGSize, scale: CGFloat, gray: CGFloat) -> CGImage? {
+        let width = Int(size.width * scale), height = Int(size.height * scale)
+        guard let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else { return nil }
+        context.setFillColor(CGColor(srgbRed: gray, green: gray, blue: gray, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
+    }
+
     init?(screen: CGSize, scale: CGFloat) {
         guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue(),
               let picture = Self.desktop(width: Int(screen.width * scale), height: Int(screen.height * scale), scale: scale)
@@ -46,9 +69,12 @@ struct GlassFidelityRig {
     // MARK: - The two renderers
 
     /// The captured picture, as `DepthOverlay.update` has the renderer draw it.
-    func capture(corners: [CGPoint], progress: Double, tuning: DepthTuning, gradient: BlurGradient = BlurGradient()) -> Frame? {
+    func capture(
+        corners: [CGPoint], progress: Double, tuning: DepthTuning, gradient: BlurGradient = BlurGradient(), cornerRadius: Double = 0
+    ) -> Frame? {
         guard let renderer = DepthRenderer(),
-              let prepared = renderer.makePicture(image: picture, screenSize: screen, pixelScale: scale) else { return nil }
+              let prepared = renderer.makePicture(image: picture, screenSize: screen, pixelScale: scale, cornerRadius: cornerRadius)
+        else { return nil }
         let uniforms = DepthRenderer.uniforms(
             corners: corners,
             layout: prepared.stack.layout,
@@ -73,8 +99,10 @@ struct GlassFidelityRig {
 
     /// The glass over the same picture, set up by `apply` as
     /// `DepthOverlay.update` would.
-    func glass(_ apply: (FrostedGlassView) -> Void) -> Frame? {
-        let view = FrostedGlassView(frame: NSRect(origin: .zero, size: screen), scale: scale, samplesOtherWindows: false)
+    func glass(cornerRadius: Double = 0, _ apply: (FrostedGlassView) -> Void) -> Frame? {
+        let view = FrostedGlassView(
+            frame: NSRect(origin: .zero, size: screen), scale: scale, cornerRadius: cornerRadius, samplesOtherWindows: false
+        )
         guard let root = view.layer else { return nil }
         root.frame = CGRect(origin: .zero, size: screen)
         let backdrop = CALayer()

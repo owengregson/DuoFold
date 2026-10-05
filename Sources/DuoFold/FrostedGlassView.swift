@@ -12,11 +12,14 @@ import QuartzCore
 ///   black layer whose opacity rises from the hinge;
 /// - the picture leans back as the captured picture does: every layer is
 ///   laid out flat and carried by a mesh to where `GlassLean` puts it;
-/// - the captured picture's blur takes in the black margin around it, which
-///   darkens its edges and spreads a little of them into the margin. The
-///   glass stretches each band's edge into the margin, and darkens edges and
-///   margin by the share of the blur at each point that falls on the
-///   picture rather than the margin;
+/// - the picture's outline, its edges and the panel's rounded top corners,
+///   fades into the black around it through a crisp core that keeps its
+///   shape and a soft skirt blurred as much as the picture
+///   (`outlineKept`): its edges blur, and its rounded corners stay round.
+///   Each band's edge is stretched into the margin, and edges and margin
+///   are darkened by the share of the outline's light at each point that
+///   falls on the picture rather than the margin, the corners with them
+///   (`ScreenCorner.shade`);
 /// - past the margin, black.
 ///
 /// Built only when `WindowServerBlur.isAvailable`.
@@ -28,12 +31,24 @@ final class FrostedGlassView: NSView {
     /// Darkening stops across the dimming's rise. The layer runs straight
     /// between them, which keeps within a step of 8 bits of the smoothstep.
     nonisolated private static let shadeIntervals = 24
+    /// The outline's crisp core: its blur, as a share of the picture's.
+    /// Blurred as much as what it holds, a rounded corner on a short bright
+    /// strip, such as the menu bar over dark windows, smears into a slanted
+    /// line by the middle of the close; with a core a quarter as blurred,
+    /// it stays round to the end.
+    nonisolated static let outlineCore = 0.25
+    /// The share of the outline's light carried by its soft skirt, blurred
+    /// as much as the picture, which fades its edges out as a picture out
+    /// of focus does. The rest is the core's.
+    nonisolated static let outlineSkirt = 0.7
+
     /// How far the edge darkening reaches each way, in blur sigmas. Past four
     /// the share of the blur on the other side is under a hundred thousandth.
     nonisolated private static let edgeReach = 4.0
-    /// Stops across the edge darkening. Straight runs between them keep
-    /// within a fifth of a step of 8 bits of the true curve.
-    nonisolated private static let edgeStops = 33
+    /// Stops across the edge darkening, enough to draw the crisp core, a
+    /// quarter as wide as the rest, with straight runs between them within
+    /// a fifth of a step of 8 bits of the true curve.
+    nonisolated private static let edgeStops = 129
     /// Rows of mesh over the screen's height. The lean squeezes the picture
     /// more toward the top, and between rows a mesh runs straight; at this
     /// many the rows stay within a hundredth of a point of the true lean.
@@ -41,6 +56,8 @@ final class FrostedGlassView: NSView {
 
     private let bandLayout = FrostBandLayout()
     private let samplesOtherWindows: Bool
+    /// The panel's top corner radius, in points (`ScreenCorner`).
+    private let cornerRadius: Double
     /// A sharp copy of the screen under the bands, so the leaning picture
     /// shows the screen where no band blurs it.
     private var base: CALayer?
@@ -49,6 +66,11 @@ final class FrostedGlassView: NSView {
     /// Left, right, top and hinge edges, darkened as the blur takes in the
     /// margin beyond each.
     private let edges = (0..<4).map { _ in CAGradientLayer() }
+    /// The panel's rounded top corners, left and right, in black. Each is
+    /// drawn for the screen where it shows, not meshed (`ScreenCorner.image`).
+    private(set) var caps = (0..<2).map { _ in CALayer() }
+    /// The corners' darkening for the last blur, kept while it holds.
+    private var cornerShade: (sigma: Double, shade: ScreenCorner.Shade)?
     /// Black past the margin.
     private let surround = CAShapeLayer()
     private var lastState: State?
@@ -63,10 +85,14 @@ final class FrostedGlassView: NSView {
         var lean: GlassLean
     }
 
-    /// - Parameter samplesOtherWindows: false blurs only layers behind the
-    ///   bands in this view's own tree, for offscreen checks.
-    init(frame: NSRect, scale: CGFloat, samplesOtherWindows: Bool = true) {
+    /// - Parameters:
+    ///   - cornerRadius: the panel's top corner radius, in points, which the
+    ///     picture keeps as it leans (`ScreenCorner`).
+    ///   - samplesOtherWindows: false blurs only layers behind the bands in
+    ///     this view's own tree, for offscreen checks.
+    init(frame: NSRect, scale: CGFloat, cornerRadius: Double = 0, samplesOtherWindows: Bool = true) {
         self.samplesOtherWindows = samplesOtherWindows
+        self.cornerRadius = cornerRadius
         super.init(frame: frame)
         let root = CALayer()
         root.contentsScale = scale
@@ -100,6 +126,13 @@ final class FrostedGlassView: NSView {
             edge.colors = profile.map { CGColor(gray: 0, alpha: $0.opacity) }
             edge.isHidden = true
             root.addSublayer(edge)
+        }
+
+        for cap in caps {
+            cap.anchorPoint = .zero
+            cap.contentsGravity = .resize
+            cap.isHidden = true
+            root.addSublayer(cap)
         }
 
         surround.anchorPoint = .zero
@@ -197,6 +230,7 @@ final class FrostedGlassView: NSView {
             GlassMesh.apply(leans ? lean.meshParts(for: lean.pictureGrid(bottom: 0, top: height, rows: Self.meshRows), layerFrame: bounds) : ([], []), to: shade)
         }
 
+        // The outline's skirt blur at a picture height: the picture's own.
         let sigma = { (picture: Double) in
             gradient.sigma(progress: state.progress, height: picture / height,
                            maxBlurRadius: tuning.maxBlurRadius, evenness: min(max(tuning.blurEvenness, 0), 1))
@@ -212,6 +246,8 @@ final class FrostedGlassView: NSView {
             GlassMesh.apply(lean.meshParts(for: grid, layerFrame: bounds), to: edge)
         }
 
+        placeCaps(sigma: sigma(height), lean: lean, scale: Double(scale))
+
         surround.isHidden = !leans
         if leans {
             surround.frame = bounds
@@ -224,6 +260,34 @@ final class FrostedGlassView: NSView {
             ].map(lean.screenPoint))
             path.closeSubpath()
             surround.path = path
+        }
+    }
+
+    // MARK: - Corners
+
+    /// Lays each top corner's darkening over the picture's corner, drawn
+    /// for the screen where the lean puts it. Hidden where nothing can be
+    /// meshed: the glass then lies flat, its corners under the panel's own.
+    private func placeCaps(sigma: Double, lean: GlassLean, scale: Double) {
+        guard cornerRadius > 0, GlassMesh.isAvailable else {
+            for cap in caps { cap.isHidden = true }
+            return
+        }
+        if cornerShade.map({ abs($0.sigma - sigma) > 1e-4 }) ?? true {
+            cornerShade = ScreenCorner.shade(
+                radius: cornerRadius, sigma: sigma, core: Self.outlineCore, skirt: Self.outlineSkirt, screenScale: scale
+            ).map { (sigma, $0) }
+        }
+        for (index, cap) in caps.enumerated() {
+            guard let shade = cornerShade?.shade,
+                  let drawn = ScreenCorner.image(of: shade, right: index == 1, lean: lean, screenScale: scale) else {
+                cap.isHidden = true
+                continue
+            }
+            cap.isHidden = false
+            cap.frame = drawn.frame
+            cap.contentsScale = drawn.scale
+            cap.contents = drawn.image
         }
     }
 
@@ -277,20 +341,28 @@ final class FrostedGlassView: NSView {
     // MARK: - Edges
 
     /// The darkening across an edge, along a layer's width: from well inside
-    /// the picture at 0 to well out in the margin at 1. A Gaussian of sigma
-    /// `s` centred `d` inside a straight edge has the share `Φ(d / s)` of
-    /// itself on the picture, and the rest on the black margin. The captured
-    /// picture blurs light, so it keeps that share of the light there, which
-    /// keeps its 1 / 2.2 power of the encoded value the black is laid over,
-    /// as the dimming has it (`shadeStops`).
+    /// the picture at 0 to well out in the margin at 1, in sigmas of the
+    /// skirt. A Gaussian of sigma `s` centred `d` inside a straight edge has
+    /// the share `Φ(d / s)` of itself on the picture, and the rest on the
+    /// black margin; the outline keeps the core's and the skirt's shares,
+    /// each by its weight (`outlineKept`). The captured picture blurs light,
+    /// so it keeps that share of the light there, which keeps its 1 / 2.2
+    /// power of the encoded value the black is laid over, as the dimming has
+    /// it (`shadeStops`).
     nonisolated static func edgeProfile() -> [FrostBandLayout.Stop] {
         (0..<edgeStops).map { index in
             let position = Double(index) / Double(edgeStops - 1)
-            // Sigmas inside the edge: edgeReach at 0, -edgeReach at 1.
+            // Skirt sigmas inside the edge: edgeReach at 0, -edgeReach at 1.
             let inside = edgeReach * (1 - 2 * position)
-            let kept = 0.5 * erfc(-inside / 2.squareRoot())
-            return FrostBandLayout.Stop(position: position, opacity: 1 - pow(kept, 1 / 2.2))
+            return FrostBandLayout.Stop(position: position, opacity: 1 - pow(outlineKept(inside), 1 / 2.2))
         }
+    }
+
+    /// The share of the light an edge keeps `inside` skirt sigmas inside
+    /// it: the core's and the skirt's, each by its share of the light.
+    nonisolated static func outlineKept(_ inside: Double) -> Double {
+        func kept(_ sigmas: Double) -> Double { 0.5 * erfc(-sigmas / 2.squareRoot()) }
+        return (1 - outlineSkirt) * kept(inside / outlineCore) + outlineSkirt * kept(inside)
     }
 
     /// Where each edge's darkening lies, as meshes of `edgeProfile` laid
