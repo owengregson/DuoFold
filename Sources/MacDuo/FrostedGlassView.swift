@@ -220,6 +220,28 @@ final class FrostedGlassView: NSView {
         }
     }
 
+    /// True while the glass leans, when the window server has to draw all
+    /// of it on every frame (`refresh`).
+    var needsEveryFrame: Bool { base.map { !$0.isHidden } ?? false }
+
+    /// Has the window server draw the whole glass again on its next frame.
+    ///
+    /// The window server redraws only where something changed, and draws a
+    /// backdrop there from what is behind that same spot, captured for that
+    /// spot alone. A leaning band shows each spot of the screen somewhere
+    /// else: a window moving behind it would be drawn black where it moved,
+    /// read from beyond what was captured, and left as it was where its
+    /// picture shows. A change, too small to see, to the layer under the
+    /// whole glass has all of it drawn and captured afresh instead, as while
+    /// the lid moves and every mesh changes.
+    func refresh() {
+        guard let base, !base.isHidden else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        base.opacity = base.opacity < 1 ? 1 : 0.99999
+        CATransaction.commit()
+    }
+
     // MARK: - Blur and dimming
 
     /// The blur up the glass in band radii: the captured picture's sigma at
