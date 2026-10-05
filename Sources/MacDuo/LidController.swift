@@ -5,8 +5,9 @@ import QuartzCore
 
 /// Watches the lid angle and drives the depth effect overlay.
 ///
-/// A timer polls the sensor, and a display link advances a spring at the
-/// screen refresh rate so the ramp stays smooth between readings.
+/// A timer polls the sensor, and a display link asks `LidAngleEstimator`
+/// where the lid is at every screen refresh, so the ramp stays smooth between
+/// readings.
 
 /// Identity of the built-in display. `NSApplication` posts a screen change for
 /// a backlight change too, and this tells the two apart.
@@ -70,9 +71,14 @@ final class LidController: ObservableObject {
     private var lastChangedAngle: Double?
     private var lastChangeTime: CFTimeInterval = 0
     private var lastClosingTime: CFTimeInterval = -.greatestFiniteMagnitude
-    /// Following a steady close, a spring trails it by 2 / frequency seconds.
-    /// At 24 that is about the lead `visualTarget` gives a fast close.
+    /// The angle the picture shows. While it follows the lid the estimator
+    /// sets it every frame; the ease back to flat springs it on from there.
     private var visualAngle = CriticallyDampedSpring(frequency: 24)
+    /// Fills in the readings, one angle for every frame.
+    private var estimator = LidAngleEstimator(tuning: .sensor(resolution: 0.01))
+    /// Whether the estimator follows the preview's script rather than the
+    /// sensor, so a switch either way starts it afresh.
+    private var estimatorFollowsScript = false
     private var consecutiveFailedReads = 0
     private var startedAt: CFTimeInterval = 0
     private var preview: PreviewRun?
@@ -100,6 +106,17 @@ final class LidController: ObservableObject {
 
     private static let idlePollInterval: TimeInterval = 1.0 / 8
     private static let activePollInterval: TimeInterval = 1.0 / 30
+    /// The sensor takes a reading every 104 ms however often it is read, but
+    /// the sooner a poll finds one, the less the picture has to guess. At 60
+    /// a second a moving lid's readings turn up 8 ms sooner on average, which
+    /// in a simulation of the sensor takes about a fifth off how far the
+    /// picture runs past a sudden stop. A read is a round trip of about a
+    /// millisecond to the sensor, so only while a picture follows a moving
+    /// lid.
+    private static let movingPollInterval: TimeInterval = 1.0 / 60
+    /// How far a speed measured from two whole degree pushes can be off,
+    /// squared: a degree's rounding over a tenth of a second.
+    private static let pushedSpeedVariance: Double = 100
     private static let fadeInDuration: TimeInterval = 0.07
     /// Degrees above the pre-warm zone at which polling speeds up.
     private static let fastPollMargin: Double = 20
@@ -107,9 +124,6 @@ final class LidController: ObservableObject {
     /// A change this large counts as the lid moving, for how long polling
     /// carries on before waiting for pushed readings.
     private static let movementThreshold: Double = 0.3
-
-    /// Degrees within which the eased picture has caught up with the lid.
-    private static let settledAngle: Double = 0.1
 
     /// Closing speed that counts as a deliberate close, in degrees per second.
     /// A still lid reads under 0.5.
@@ -125,10 +139,6 @@ final class LidController: ObservableObject {
 
     /// Sensor latency the prediction adds on top of the reading's own age.
     private static let predictionLatency: TimeInterval = 0.04
-
-    /// A closing lid changes its reading at every sensor refresh, about every
-    /// 100 ms. Longer without one and it has stopped.
-    private static let predictionFreshness: TimeInterval = 0.15
 
     /// The ordinary hysteresis release waits this long. A prediction can fire
     /// while the last reading is still above the trigger angle, but deliberate
@@ -209,10 +219,12 @@ final class LidController: ObservableObject {
         isSensorAvailable = sensor.isAvailable
         guard isSensorAvailable else { return }
 
+        estimator.reset(tuning: sensorTuning)
         if let angle = sensor.angle() {
             rawAngle = angle
             currentAngle = angle
             visualAngle.reset(to: angle)
+            estimator.observe(angle, at: CACurrentMediaTime())
         }
         // Before the first poll, which reads it.
         builtInLayout = Layout(displayID: NSScreen.builtIn?.displayID, frame: NSScreen.builtIn?.frame)
@@ -352,8 +364,10 @@ final class LidController: ObservableObject {
         guard !isSuspended else { return }
 
         let angle: Double
+        let readAt: CFTimeInterval
         if let run = preview {
-            guard let scripted = run.angle(at: CACurrentMediaTime()) else {
+            readAt = CACurrentMediaTime()
+            guard let scripted = run.angle(at: readAt) else {
                 preview = nil
                 peakAngle = 0
                 // The next reading is the real lid, and the jump to it from
@@ -367,6 +381,7 @@ final class LidController: ObservableObject {
             }
             angle = scripted
         } else {
+            let asked = CACurrentMediaTime()
             guard let read = sensor.angle() else {
                 consecutiveFailedReads += 1
                 if consecutiveFailedReads > 30, isActive {
@@ -387,10 +402,13 @@ final class LidController: ObservableObject {
             }
             consecutiveFailedReads = 0
             angle = read
+            // Halfway through the round trip, about when the sensor answered.
+            readAt = (asked + CACurrentMediaTime()) / 2
             learnHinge(from: read)
         }
 
         rawAngle = angle
+        feedEstimator(angle, at: readAt)
         peakAngle = max(peakAngle, angle)
         if isActive { lowestRunAngle = min(lowestRunAngle, angle) }
         publish(angle: angle)
@@ -433,14 +451,16 @@ final class LidController: ObservableObject {
             isActive: isActive,
             capturesScreen: capturesScreen,
             isTimeoutEnabled: preferences.isTimeoutEnabled,
-            // Looser than the hundredths a resting lid's reading flickers by,
-            // and far below what the blur could show.
-            isPictureSettled: abs(visualAngle.value - rawAngle) < Self.settledAngle
-                && abs(visualAngle.velocity) < 10 * Self.settledAngle,
+            isPictureSettled: estimator.isSettled(at: now),
             sinceMovement: now - lastMovementTime
         )
         if !needsAngles, pushWatch.isLive {
             sleep(at: angle)
+            return
+        }
+        // The preview's script is exact whenever it is read.
+        if isActive, !isClosingOut, displayLink != nil, preview == nil, estimator.isMoving {
+            setPollInterval(Self.movingPollInterval)
             return
         }
         let prewarmZone = effectiveThreshold + preferences.prewarmCeiling
@@ -456,6 +476,23 @@ final class LidController: ObservableObject {
         hingeLimit = limit
         preferences.hingeLimit = limit
         Diagnostics.lid.notice("hinge limit now \(limit, format: .fixed(precision: 2))")
+    }
+
+    /// The estimator's tuning for this Mac's sensor.
+    private var sensorTuning: LidAngleEstimator.Tuning {
+        .sensor(resolution: sensor.resolution == .wholeDegrees ? 1 : 0.01)
+    }
+
+    /// Hands a reading to the estimator, starting it afresh whenever the
+    /// readings switch between the sensor and the preview's script.
+    private func feedEstimator(_ angle: Double, at time: CFTimeInterval) {
+        if (preview != nil) != estimatorFollowsScript {
+            estimatorFollowsScript = preview != nil
+            estimator.reset(tuning: estimatorFollowsScript
+                ? .script(pollInterval: Self.activePollInterval)
+                : sensorTuning)
+        }
+        estimator.observe(angle, at: time)
     }
 
     /// Stops polling until a pushed reading shows the lid moving.
@@ -501,11 +538,17 @@ final class LidController: ObservableObject {
             }
             // The reading before the sleep is too old to measure against.
             lastChangedAngle = nil
+            // The picture, if one is up, carries on from where it rests. A
+            // speed of zero is one the pushes could not measure.
+            if preview == nil {
+                estimator.resume(speed: speed, variance: speed == 0 ? nil : Self.pushedSpeedVariance, at: now)
+            }
             wake()
             poll()
         case .silent:
             Diagnostics.lid.notice("pushed readings stopped, polling until they return")
             pushWatch.setInterval(pushInterval, on: sensor)
+            if preview == nil { estimator.resume(at: CACurrentMediaTime()) }
             wake()
         }
     }
@@ -678,16 +721,6 @@ final class LidController: ObservableObject {
         guard angularVelocity < -Self.predictionSpeedFloor else { return rawAngle }
         let staleness = min(CACurrentMediaTime() - lastChangeTime, 0.12)
         return rawAngle + angularVelocity * (staleness + Self.predictionLatency)
-    }
-
-    /// Where the picture heads. While a fast close keeps changing the reading,
-    /// that is where the lid is heading rather than where it last read. Once
-    /// the readings stop changing the lid has stopped too, and the picture
-    /// settles on the last one instead of carrying on past it until the speed
-    /// decays.
-    private func visualTarget() -> Double {
-        guard isActive, CACurrentMediaTime() - lastChangeTime < Self.predictionFreshness else { return rawAngle }
-        return predictedAngle()
     }
 
     private func publish(angle: Double) {
@@ -900,9 +933,14 @@ final class LidController: ObservableObject {
             Diagnostics.lid.notice("display link skipped, no overlay window")
             return
         }
-        Diagnostics.lid.notice("display link started")
         let link = window.displayLink(target: self, selector: #selector(step(_:)))
+        // Every refresh the screen has, 120 a second on ProMotion: the
+        // estimate is new at every frame while the lid moves, and a frame
+        // that would look the same as the last is not drawn.
+        let fastest = Float(window.screen?.maximumFramesPerSecond ?? 60)
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: min(80, fastest), maximum: fastest, preferred: fastest)
         link.add(to: .main, forMode: .common)
+        Diagnostics.lid.notice("display link started, up to \(Int(fastest)) fps")
         lastFrameTime = CACurrentMediaTime()
         displayLink = link
     }
@@ -920,14 +958,22 @@ final class LidController: ObservableObject {
         if let frame = streamer.newFrame() {
             overlay.absorb(frame)
         }
-        let target = isClosingOut ? effectiveThreshold : visualTarget()
-        visualAngle.advance(to: target, dt: dt)
 
         guard isClosingOut else {
+            // Where the lid will be as this frame reaches the screen.
+            if estimator.hasReading {
+                let motion = estimator.frame(at: link.targetTimestamp)
+                visualAngle.value = motion.angle
+                visualAngle.velocity = motion.speed
+            } else {
+                visualAngle.reset(to: rawAngle)
+            }
             applyVisual(angle: visualAngle.value)
             followHaptics(angle: visualAngle.value)
             return
         }
+        let target = effectiveThreshold
+        visualAngle.advance(to: target, dt: dt)
         // At or above the threshold the picture is already flat, so a lid
         // that opened past it finishes at once.
         let settled = visualAngle.value >= target - Self.closingOutSettleEpsilon
@@ -1010,6 +1056,8 @@ final class LidController: ObservableObject {
         isSuspended = true
         stopEffectAndCapture()
         pushWatch.pause(sensor)
+        estimator.reset(tuning: sensorTuning)
+        estimatorFollowsScript = false
     }
 
     private func resume() {
@@ -1029,9 +1077,12 @@ final class LidController: ObservableObject {
         isClosingOut = false
         // A reading from before sleep and one after must not make a hold.
         hinge.interrupt()
+        estimator.reset(tuning: sensorTuning)
+        estimatorFollowsScript = false
         if let angle = sensor.angle() {
             rawAngle = angle
             visualAngle.reset(to: angle)
+            estimator.observe(angle, at: CACurrentMediaTime())
         }
         if sensor.isPushing {
             pushInterval = LidWakePolicy.enabledPushInterval

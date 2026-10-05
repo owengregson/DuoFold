@@ -1,7 +1,7 @@
 import Foundation
 
-/// Turns the sensor's 10 Hz steps into a value that changes smoothly at the
-/// display refresh rate.
+/// Eases the picture back to flat at the display refresh rate, from wherever
+/// it was following the lid.
 ///
 /// Semi-implicit Euler stays stable while `frequency * dt` is below 2. The
 /// caller clamps `dt`.
