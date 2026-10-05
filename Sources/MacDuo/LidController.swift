@@ -83,6 +83,9 @@ final class LidController: ObservableObject {
     private var isCapturePending = false
     private var openDwell = LidOpenDwell()
     private var shutHold = LidShutHold()
+    /// True while a run's picture is down on a lid held shut. The run is
+    /// still on, so the picture goes back up as the lid opens.
+    private var isParked = false
     /// Where the lid last moved to by more than `timeoutMovementThreshold`,
     /// and when. The timeout counts from there.
     private var timeoutReferenceAngle: Double?
@@ -290,6 +293,7 @@ final class LidController: ObservableObject {
         overlay.discardLive()
         preview = nil
         isActive = false
+        isParked = false
         endHaptics()
         updateEscapeKey()
     }
@@ -440,6 +444,7 @@ final class LidController: ObservableObject {
             capturesScreen: capturesScreen,
             isTimeoutEnabled: preferences.isTimeoutEnabled,
             isShut: shutHold.isShut,
+            isParked: isParked,
             isPictureSettled: estimator.isSettled(at: now),
             sinceMovement: now - lastMovementTime
         )
@@ -588,19 +593,14 @@ final class LidController: ObservableObject {
             ),
             isClearlyOpening: isActive ? motion.isClearlyOpening : approach.isOpening,
             hasDwelledOpen: openDwell.hasDwelled(at: now, duration: Self.openDwellDuration),
-            minimumDurationElapsed: minimumDurationElapsed,
-            hasHeldShut: shutHold.hasHeld(at: now)
+            minimumDurationElapsed: minimumDurationElapsed
         )
 
-        // A run ended by a shut lid stays over until the lid opens back to
-        // the start angle, as one the timeout ends does.
-        if isActive, !wanted, shutHold.hasHeld(at: now) {
-            Diagnostics.lid.notice("end: lid held shut, raw \(angle, format: .fixed(precision: 2))")
-            reopenLatch.engage()
-        }
-
-        // The timeout only cuts short a run the policy would keep showing.
-        if isActive, wanted, minimumDurationElapsed,
+        // The timeout only cuts short a run the policy would keep showing. A
+        // shut lid is not held still on the picture: it parks the run, so the
+        // opening still plays, and the count starts afresh once it opens.
+        if shutHold.isShut { timeoutReferenceAngle = nil }
+        if isActive, wanted, minimumDurationElapsed, !shutHold.isShut,
            preferences.isTimeoutEnabled, isPastTimeout(angle: angle) {
             reopenLatch.engage()
             return false
@@ -646,6 +646,14 @@ final class LidController: ObservableObject {
             return
         }
         if isActive {
+            if shutHold.hasHeld(at: CACurrentMediaTime()) {
+                park()
+                return
+            }
+            if isParked {
+                isParked = false
+                Diagnostics.lid.notice("unpark: lid opening, raw \(angle, format: .fixed(precision: 2))")
+            }
             if capturesScreen, preferences.isLivePicture { streamer.start() }
             if !overlay.isVisible, !isCapturePending { presentPicture() }
             // A visible overlay with no link would sit at its first frame.
@@ -655,6 +663,25 @@ final class LidController: ObservableObject {
             // would free it.
             updatePrewarm(angle: angle, ceiling: effectiveThreshold + preferences.prewarmCeiling)
         }
+    }
+
+    /// Takes a run's picture down while the lid stays shut: the screen is
+    /// dark, and the capture would run on for nothing. The run stays on,
+    /// held at full strength, so the picture goes back up as the lid opens
+    /// and follows it out.
+    private func park() {
+        guard !isParked else { return }
+        isParked = true
+        Diagnostics.lid.notice("park: lid held shut, raw \(self.rawAngle, format: .fixed(precision: 2))")
+        pictureTask?.cancel()
+        pictureTask = nil
+        isCapturePending = false
+        stopDisplayLink()
+        overlay.dismiss(animated: false)
+        snapshotter.endPrewarm()
+        streamer.stop()
+        overlay.discardLive()
+        updateEscapeKey()
     }
 
     /// Runs only while the lid is closing, so holding it still does not leave
@@ -698,6 +725,7 @@ final class LidController: ObservableObject {
 
     private func setActive(_ active: Bool) {
         isActive = active
+        isParked = false
         if active {
             peakAngle = rawAngle
             lowestRunAngle = rawAngle
@@ -761,6 +789,10 @@ final class LidController: ObservableObject {
         let plan = picturePlan
         if plan.first != .pictureAlone {
             guard overlay.showGlass(on: screen, startAngle: effectiveThreshold, tuning: tuning) else { return }
+            // Its first frame on screen shows the lid as it is, rather than
+            // no effect until the link draws: a run unparked as the lid opens
+            // is at full strength.
+            applyVisual(angle: estimator.hasReading ? estimator.motion(at: CACurrentMediaTime()).angle : rawAngle)
             if plan.first == .glass {
                 startDisplayLink()
                 return

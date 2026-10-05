@@ -39,19 +39,23 @@ struct LidShutTests {
         #expect(LidAngleSensor.hingeAngle(fromReported: -1) == nil)
     }
 
+    enum Event: Equatable {
+        case start, end, park, unpark
+    }
+
     /// What `LidController` decides on each poll, with every reading found
-    /// once: when a run starts and ends, and at what angle.
-    private static func decisions(
+    /// once: when a run starts and ends, when its picture comes down on a
+    /// lid held shut and goes back up as it opens, and at what angle.
+    private static func events(
         for readings: [(time: Double, angle: Double)]
-    ) -> [(time: Double, angle: Double, active: Bool)] {
+    ) -> [(time: Double, angle: Double, event: Event)] {
         var motion = LidMotion()
         var estimator = LidAngleEstimator(tuning: .sensor(resolution: 0.01))
         var dwell = LidOpenDwell()
         var shut = LidShutHold()
-        var latch = LidReopenLatch()
-        var isActive = false
+        var isActive = false, isParked = false
         var peak = 0.0, lowest = 0.0, startedAt = 0.0
-        var changes: [(time: Double, angle: Double, active: Bool)] = []
+        var events: [(time: Double, angle: Double, event: Event)] = []
         for (now, angle) in readings {
             peak = max(peak, angle)
             if isActive { lowest = min(lowest, angle) }
@@ -59,7 +63,6 @@ struct LidShutTests {
             motion.update(with: angle, at: now, prewarmSpeed: 8)
             dwell.update(angle: angle, at: now, dwellAngle: policy.dwellAngle)
             shut.update(angle: angle, at: now)
-            if !isActive, !latch.allowsStart(angle: angle, threshold: policy.threshold) { continue }
             let approach = LidApproach(estimator) ?? LidApproach(angle: angle, speed: motion.velocity)
             let wanted = policy.wantsEffect(
                 isEnabled: true,
@@ -71,52 +74,60 @@ struct LidShutTests {
                 wasClosingRecently: approach.isClosing || motion.intent.wasClosingRecently(at: now, memoryDuration: 1.5),
                 isClearlyOpening: isActive ? motion.isClearlyOpening : approach.isOpening,
                 hasDwelledOpen: dwell.hasDwelled(at: now, duration: 1),
-                minimumDurationElapsed: now - startedAt > 0.35,
-                hasHeldShut: shut.hasHeld(at: now)
+                minimumDurationElapsed: now - startedAt > 0.35
             )
-            if isActive, !wanted, shut.hasHeld(at: now) { latch.engage() }
-            guard wanted != isActive else { continue }
-            isActive = wanted
-            changes.append((now, angle, wanted))
-            if wanted {
-                peak = angle
-                lowest = angle
-                dwell.reset()
-                startedAt = now
+            if wanted != isActive {
+                isActive = wanted
+                isParked = false
+                events.append((now, angle, wanted ? .start : .end))
+                if wanted {
+                    peak = angle
+                    lowest = angle
+                    dwell.reset()
+                    startedAt = now
+                }
+                continue
+            }
+            // As `reconcile` parks a run, and unparks it.
+            if isActive, shut.hasHeld(at: now) != isParked {
+                isParked.toggle()
+                events.append((now, angle, isParked ? .park : .unpark))
             }
         }
-        return changes
+        return events
     }
 
     @Test
     func testAFullCloseAndAFastOpenAreOneRun() throws {
-        let changes = Self.decisions(for: try Self.readings())
+        let events = Self.events(for: try Self.readings())
         // Started on the way down, held through the shut, and let go only
         // once the lid opened back past the start angle: no end as it shut,
         // and no second start part way up.
-        #expect(changes.map(\.active) == [true, false], "\(changes)")
-        #expect(changes.last?.angle == 85)
+        #expect(events.map(\.event) == [.start, .end], "\(events)")
+        #expect(events.last?.angle == 85)
     }
 
     @Test
-    func testALidHeldShutEndsTheRunAndOpeningLeavesTheScreenAlone() throws {
-        // Closed past the start angle and pressed shut, resting there with
-        // its reading creeping either side of zero, then opened slowly and
-        // closed again before reaching the start angle.
+    func testALidHeldShutParksTheRunAndTheOpeningStillPlays() throws {
+        // Closed past the start angle and pressed shut for three seconds,
+        // its reading creeping either side of zero, then opened.
         var reported: [Double] = [110, 100, 88, 70, 40, 10, 1.5]
         reported += (0..<30).map { [359.1, 359.0, 0.44, 0.12, 359.95][$0 % 5] }
-        reported += [3, 10, 20, 35, 50, 65, 75, 70, 60]
+        reported += [3, 10, 20, 35, 50, 65, 80, 95, 110, 125, 125]
         let readings = try reported.enumerated().map { index, value in
             (time: Double(index) * Self.refresh, angle: try #require(LidAngleSensor.hingeAngle(fromReported: value)))
         }
         let shutAt = readings[7].time
-        let changes = Self.decisions(for: readings)
-        // One run, ended by the lid held shut, two seconds after it shut.
-        #expect(changes.map(\.active) == [true, false], "\(changes)")
-        let end = try #require(changes.last)
-        #expect(end.angle <= LidShutHold.shutAngle)
-        #expect(end.time - shutAt >= LidShutHold.duration)
-        #expect(end.time - shutAt < LidShutHold.duration + 1.5 * Self.refresh)
+        let events = Self.events(for: readings)
+        // One run: its picture down two seconds after the lid shut, back up
+        // on the first reading of the opening, and let go only once the lid
+        // is back past the start angle, as an opening after a short shut is.
+        #expect(events.map(\.event) == [.start, .park, .unpark, .end], "\(events)")
+        guard events.count == 4 else { return }
+        #expect(events[1].time - shutAt >= LidShutHold.duration)
+        #expect(events[1].time - shutAt < LidShutHold.duration + 1.5 * Self.refresh)
+        #expect(events[2].angle == 3)
+        #expect(events[3].angle >= Self.policy.threshold)
     }
 
     @Test

@@ -66,18 +66,25 @@ struct LidWakePolicy {
         capturesScreen: Bool,
         isTimeoutEnabled: Bool,
         isShut: Bool,
+        isParked: Bool,
         isPictureSettled: Bool,
         sinceMovement: TimeInterval
     ) -> Bool {
-        if isPreviewing || isClosingOut || isPanelOpen || isCapturePending { return true }
+        if isPreviewing || isPanelOpen { return true }
+        // A run parked on a shut lid has nothing to draw and nothing to
+        // capture, and a pushed reading wakes it as the lid opens. A lid
+        // resting shut flickers past the movement threshold, which would
+        // otherwise keep it polling.
+        if isParked { return false }
+        if isClosingOut || isCapturePending { return true }
         // Only a poll ends a capture warmed up for a close that never came,
         // once its linger runs out.
         if isPrewarming { return true }
         if sinceMovement < Self.settleDuration { return true }
         guard isActive else { return false }
         // A capture keeps delivering frames, the timeout and a shut lid count
-        // time, and a picture still easing toward the lid has frames left to
-        // draw.
+        // time toward ending or parking the run, and a picture still easing
+        // toward the lid has frames left to draw.
         return capturesScreen || isTimeoutEnabled || isShut || !isPictureSettled
     }
 
