@@ -31,6 +31,8 @@
 "Perspective" = "透视";
 "Lean back" = "后倾幅度";
 "Degrees of lean per degree of closing. 1 holds it still." = "每合上 1° 时画面的后倾角度。设为 1 时，画面在空间中保持不动。";
+"Max lean" = "最大后倾";
+"The picture stops leaning back past this angle." = "画面后倾到此角度后不再继续。";
 "0 keeps the sides parallel, 100 converges sharply." = "0 保持两侧平行，100 则使两侧明显向内收拢。";
 "Haptics" = "触感";
 "Trackpad taps" = "触控板轻触";

@@ -15,6 +15,7 @@ final class Preferences: ObservableObject {
         static let maxDim = "maxDim"
         static let viewingDistance = "viewingDistance"
         static let recession = "recession"
+        static let maxLean = "maxLean"
         static let blurEvenness = "blurEvenness"
         static let dimReach = "dimReach"
         static let showsAngleInMenuBar = "showsAngleInMenuBar"
@@ -30,7 +31,7 @@ final class Preferences: ObservableObject {
 
         static let all = [
             isEnabled, isTimeoutEnabled, thresholdAngle, blurSpan, maxBlurRadius,
-            maxDim, viewingDistance, recession, blurEvenness, dimReach,
+            maxDim, viewingDistance, recession, maxLean, blurEvenness, dimReach,
             showsAngleInMenuBar, showsMenuBarIcon, isLivePicture, capturesScreen, frost,
             isHapticsEnabled, hapticStyle, hapticStrength, hapticTaps, isHapticsOnOpening,
         ]
@@ -45,6 +46,7 @@ final class Preferences: ObservableObject {
         Key.maxDim: 1.0,
         Key.viewingDistance: 6.0,
         Key.recession: 1.0,
+        Key.maxLean: 45.0,
         Key.blurEvenness: 0.0,
         Key.dimReach: 0.5,
         Key.showsAngleInMenuBar: false,
@@ -104,6 +106,11 @@ final class Preferences: ObservableObject {
     /// closes. One holds the picture still in the room.
     @Published var recession: Double {
         didSet { defaults.set(recession, forKey: Key.recession) }
+    }
+
+    /// The most the picture leans back, in degrees. Past it the picture holds.
+    @Published var maxLean: Double {
+        didSet { defaults.set(maxLean, forKey: Key.maxLean) }
     }
 
     /// Blur at the hinge edge as a fraction of the blur at the far edge. One
@@ -248,6 +255,7 @@ final class Preferences: ObservableObject {
         maxDim = defaults.double(forKey: Key.maxDim)
         viewingDistance = defaults.double(forKey: Key.viewingDistance)
         recession = defaults.double(forKey: Key.recession)
+        maxLean = defaults.double(forKey: Key.maxLean)
         blurEvenness = defaults.double(forKey: Key.blurEvenness)
         dimReach = defaults.double(forKey: Key.dimReach)
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)
@@ -274,6 +282,7 @@ final class Preferences: ObservableObject {
         maxDim = defaults.double(forKey: Key.maxDim)
         viewingDistance = defaults.double(forKey: Key.viewingDistance)
         recession = defaults.double(forKey: Key.recession)
+        maxLean = defaults.double(forKey: Key.maxLean)
         blurEvenness = defaults.double(forKey: Key.blurEvenness)
         dimReach = defaults.double(forKey: Key.dimReach)
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)

@@ -31,6 +31,8 @@
 "Perspective" = "Perspective";
 "Lean back" = "Lean back";
 "Degrees of lean per degree of closing. 1 holds it still." = "Degrees of lean per degree of closing. 1 holds it still.";
+"Max lean" = "Max lean";
+"The picture stops leaning back past this angle." = "The picture stops leaning back past this angle.";
 "0 keeps the sides parallel, 100 converges sharply." = "0 keeps the sides parallel, 100 converges sharply.";
 "Haptics" = "Haptics";
 "Trackpad taps" = "Trackpad taps";

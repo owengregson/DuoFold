@@ -197,6 +197,10 @@ struct SettingsView: View {
                 help: localized("Degrees of lean per degree of closing. 1 holds it still.")
             )
             slider(
+                localized("Max lean"), value: $preferences.maxLean, in: 10...85, format: "%.0f°",
+                help: localized("The picture stops leaning back past this angle.")
+            )
+            slider(
                 localized("Perspective"), value: perspective, in: 0...1, format: "%.0f%%", scale: 100,
                 help: localized("0 keeps the sides parallel, 100 converges sharply.")
             )
