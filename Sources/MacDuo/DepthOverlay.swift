@@ -233,12 +233,17 @@ final class DepthOverlay {
     }
 
     /// Hands one live frame to the renderer and reveals the window once the
-    /// first one has landed.
-    func absorb(_ frame: CapturedFrame) {
+    /// first one has landed. A picture that goes up together with the glass
+    /// under it, before the screen lights, has no lean to ease into.
+    func absorb(_ frame: CapturedFrame, easesLean: Bool = true) {
         guard window != nil, let renderer else { return }
         renderer.absorb(frame)
-        reveal()
+        reveal(easesLean: easesLean)
     }
+
+    /// The live frame the picture was last drawn from, kept by whoever wants
+    /// to draw it again once this run is gone.
+    var heldFrame: CapturedFrame? { renderer?.heldFrame }
 
     /// Starts a live overlay from one held frame.
     func seed(image: CGImage) {
@@ -387,11 +392,11 @@ final class DepthOverlay {
 
     /// Fades the window in once, and only once the picture has something to
     /// draw. The picture starts flat and eases into the lid's lean from here.
-    private func reveal() {
+    private func reveal(easesLean: Bool = true) {
         guard let window, !hasRevealed, renderer?.isReady == true else { return }
         hasRevealed = true
         let now = CACurrentMediaTime()
-        leanCatchUp.begin(at: now)
+        if easesLean { leanCatchUp.begin(at: now) }
         if bridge != nil {
             handover = GlassHandover()
             Diagnostics.geometry.notice(

@@ -40,12 +40,14 @@ struct LidShutTests {
     }
 
     enum Event: Equatable {
-        case start, end, park, unpark
+        case start, end, endShut, reopen
     }
 
     /// What `LidController` decides on each poll, with every reading found
-    /// once: when a run starts and ends, when its picture comes down on a
-    /// lid held shut and goes back up as it opens, and at what angle.
+    /// once: when a run starts and ends, when a lid held shut ends it and
+    /// the lid opening brings it back, and at what angle. macOS reporting
+    /// the lid open would bring it back sooner; this is the reading that
+    /// does when that report does not come.
     private static func events(
         for readings: [(time: Double, angle: Double)]
     ) -> [(time: Double, angle: Double, event: Event)] {
@@ -53,7 +55,7 @@ struct LidShutTests {
         var estimator = LidAngleEstimator(tuning: .sensor(resolution: 0.01))
         var dwell = LidOpenDwell()
         var shut = LidShutHold()
-        var isActive = false, isParked = false
+        var isActive = false, opensFromShut = false
         var peak = 0.0, lowest = 0.0, startedAt = 0.0
         var events: [(time: Double, angle: Double, event: Event)] = []
         for (now, angle) in readings {
@@ -63,6 +65,20 @@ struct LidShutTests {
             motion.update(with: angle, at: now, prewarmSpeed: 8)
             dwell.update(angle: angle, at: now, dwellAngle: policy.dwellAngle)
             shut.update(angle: angle, at: now)
+            // As `reconcile` brings back a run a shut lid ended.
+            if !isActive, opensFromShut, !shut.isShut {
+                opensFromShut = false
+                if angle < policy.threshold {
+                    shut.reset()
+                    isActive = true
+                    peak = angle
+                    lowest = angle
+                    dwell.reset()
+                    startedAt = now
+                    events.append((now, angle, .reopen))
+                }
+                continue
+            }
             let approach = LidApproach(estimator) ?? LidApproach(angle: angle, speed: motion.velocity)
             let wanted = policy.wantsEffect(
                 isEnabled: true,
@@ -78,7 +94,6 @@ struct LidShutTests {
             )
             if wanted != isActive {
                 isActive = wanted
-                isParked = false
                 events.append((now, angle, wanted ? .start : .end))
                 if wanted {
                     peak = angle
@@ -88,10 +103,11 @@ struct LidShutTests {
                 }
                 continue
             }
-            // As `reconcile` parks a run, and unparks it.
-            if isActive, shut.hasHeld(at: now) != isParked {
-                isParked.toggle()
-                events.append((now, angle, isParked ? .park : .unpark))
+            // As `reconcile` ends a run on a lid held shut.
+            if isActive, shut.hasHeld(at: now) {
+                isActive = false
+                opensFromShut = true
+                events.append((now, angle, .endShut))
             }
         }
         return events
@@ -108,7 +124,7 @@ struct LidShutTests {
     }
 
     @Test
-    func testALidHeldShutParksTheRunAndTheOpeningStillPlays() throws {
+    func testALidHeldShutEndsTheRunAndTheOpeningBringsItBack() throws {
         // Closed past the start angle and pressed shut for three seconds,
         // its reading creeping either side of zero, then opened.
         var reported: [Double] = [110, 100, 88, 70, 40, 10, 1.5]
@@ -119,10 +135,10 @@ struct LidShutTests {
         }
         let shutAt = readings[7].time
         let events = Self.events(for: readings)
-        // One run: its picture down two seconds after the lid shut, back up
-        // on the first reading of the opening, and let go only once the lid
-        // is back past the start angle, as an opening after a short shut is.
-        #expect(events.map(\.event) == [.start, .park, .unpark, .end], "\(events)")
+        // Ended a second after the lid shut, back on the first reading of
+        // the opening, and let go only once the lid is back past the start
+        // angle, as an opening after a short shut is.
+        #expect(events.map(\.event) == [.start, .endShut, .reopen, .end], "\(events)")
         guard events.count == 4 else { return }
         #expect(events[1].time - shutAt >= LidShutHold.duration)
         #expect(events[1].time - shutAt < LidShutHold.duration + 1.5 * Self.refresh)
@@ -146,8 +162,8 @@ struct LidShutTests {
         hold.update(angle: 1.5, at: 5)
         #expect(!hold.isShut && !hold.hasHeld(at: 10))
         hold.update(angle: 0.5, at: 6)
-        #expect(!hold.hasHeld(at: 7.9))
-        #expect(hold.hasHeld(at: 8))
+        #expect(!hold.hasHeld(at: 6 + LidShutHold.duration - 0.1))
+        #expect(hold.hasHeld(at: 6 + LidShutHold.duration))
     }
 
     @Test

@@ -1,4 +1,6 @@
 import Foundation
+import IOKit
+import IOKit.pwr_mgt
 import LidAngleKit
 import QuartzCore
 
@@ -66,16 +68,15 @@ struct LidWakePolicy {
         capturesScreen: Bool,
         isTimeoutEnabled: Bool,
         isShut: Bool,
-        isParked: Bool,
         isPictureSettled: Bool,
         sinceMovement: TimeInterval
     ) -> Bool {
         if isPreviewing || isPanelOpen { return true }
-        // A run parked on a shut lid has nothing to draw and nothing to
-        // capture, and a pushed reading wakes it as the lid opens. A lid
-        // resting shut flickers past the movement threshold, which would
-        // otherwise keep it polling.
-        if isParked { return false }
+        // A shut lid with no run up waits for the lid to open, which macOS
+        // reports and a pushed reading shows. Resting shut, its reading
+        // flickers past the movement threshold, which would otherwise keep it
+        // polling.
+        if isShut, !isActive { return false }
         if isClosingOut || isCapturePending { return true }
         // Only a poll ends a capture warmed up for a close that never came,
         // once its linger runs out.
@@ -83,8 +84,8 @@ struct LidWakePolicy {
         if sinceMovement < Self.settleDuration { return true }
         guard isActive else { return false }
         // A capture keeps delivering frames, the timeout and a shut lid count
-        // time toward ending or parking the run, and a picture still easing
-        // toward the lid has frames left to draw.
+        // time toward ending the run, and a picture still easing toward the
+        // lid has frames left to draw.
         return capturesScreen || isTimeoutEnabled || isShut || !isPictureSettled
     }
 
@@ -212,5 +213,56 @@ final class LidPushWatch: @unchecked Sendable {
         filter.wake()
         lock.unlock()
         if wasAsleep { onWake(.silent) }
+    }
+}
+
+/// Hears macOS report the lid opening or shutting.
+///
+/// macOS turns the screen on as it reports the lid open, a few degrees
+/// open, before a pushed reading can show the lid moving: in the logs the
+/// report came 40 ms ahead of the push that woke polling, by when the lid
+/// was nine degrees open. Anything that has to be on screen the moment it
+/// lights goes up on this.
+final class LidClamshellWatch {
+
+    /// `kIOPMMessageClamshellStateChange`, which Swift does not import:
+    /// `iokit_family_msg(sub_iokit_powermanagement, 0x100)`.
+    private static let clamshellStateChange: UInt32 = 0xE003_4100
+
+    private var port: IONotificationPortRef?
+    private var notifier: io_object_t = 0
+    /// Called on the main queue with whether the lid is now shut.
+    private let onChange: (Bool) -> Void
+
+    init(onChange: @escaping (Bool) -> Void) {
+        self.onChange = onChange
+    }
+
+    deinit {
+        if notifier != 0 { IOObjectRelease(notifier) }
+        if let port { IONotificationPortDestroy(port) }
+    }
+
+    /// False when the power manager could not be found or listened to.
+    @discardableResult
+    func start() -> Bool {
+        guard port == nil else { return true }
+        let root = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+        guard root != IO_OBJECT_NULL else { return false }
+        defer { IOObjectRelease(root) }
+        guard let port = IONotificationPortCreate(kIOMainPortDefault) else { return false }
+        IONotificationPortSetDispatchQueue(port, .main)
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        let result = IOServiceAddInterestNotification(port, root, kIOGeneralInterest, { context, _, type, argument in
+            guard let context, type == LidClamshellWatch.clamshellStateChange else { return }
+            let isShut = Int(bitPattern: argument) & Int(kClamshellStateBit) != 0
+            Unmanaged<LidClamshellWatch>.fromOpaque(context).takeUnretainedValue().onChange(isShut)
+        }, context, &notifier)
+        guard result == KERN_SUCCESS else {
+            IONotificationPortDestroy(port)
+            return false
+        }
+        self.port = port
+        return true
     }
 }
