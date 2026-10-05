@@ -112,7 +112,7 @@ struct LidHingeLimitTests {
                 isEnabled: true,
                 isActive: true,
                 angle: limit,
-                predictedAngle: limit,
+                estimatedAngle: limit,
                 riseSinceLowest: 0,
                 hasBeenAboveThreshold: true,
                 wasClosingRecently: false,

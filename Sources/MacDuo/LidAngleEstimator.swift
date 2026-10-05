@@ -378,6 +378,24 @@ struct LidAngleEstimator {
         hasReading ? motion(at: time).speed : 0
     }
 
+    /// The newest reading, filtered, and the speed the lid is carried on at
+    /// from it, or `nil` before any reading. Unlike the picture's, the speed
+    /// is not blended in: it turns round at the reading that shows the lid
+    /// turning, where the picture runs on past and comes back.
+    var latest: Motion? {
+        hasReading ? Motion(angle: state.x, speed: carriedSpeed, acceleration: carriedDeceleration) : nil
+    }
+
+    /// Puts the picture where the readings put the lid, for a picture that
+    /// was not on screen and so has nothing to carry on from.
+    mutating func rejoin(at time: TimeInterval) {
+        held = nil
+        offset = 0
+        offsetSpeed = 0
+        offsetAcceleration = 0
+        blendStart = time
+    }
+
     /// True while the lid is carried along, as opposed to held still.
     var isMoving: Bool { carriedSpeed != 0 }
 

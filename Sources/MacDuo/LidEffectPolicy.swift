@@ -38,11 +38,6 @@ struct LidMotion {
     /// Opening speed that counts as a deliberate reversal, in degrees per second.
     static let triggerOpeningSpeed: Double = 2
 
-    static let predictionSpeedFloor: Double = 40
-
-    /// Sensor latency the prediction adds on top of the reading's own age.
-    static let predictionLatency: TimeInterval = 0.04
-
     /// Degrees per second, negative while the lid closes.
     private(set) var velocity: Double = 0
     private(set) var intent = LidMotionIntent()
@@ -100,17 +95,35 @@ struct LidMotion {
         lastChangedAngle = nil
     }
 
-    /// A reading can be a full sensor refresh old, so a fast close works from
-    /// where the lid is heading rather than the last reading.
-    func predictedAngle(from angle: Double, at now: TimeInterval) -> Double {
-        guard velocity < -Self.predictionSpeedFloor else { return angle }
-        let staleness = min(now - lastChangeTime, 0.12)
-        return angle + velocity * (staleness + Self.predictionLatency)
-    }
-
     /// Forgets the motion, so the next reading starts a fresh baseline.
     mutating func reset() {
         self = LidMotion()
+    }
+}
+
+/// What a start goes on: the newest reading, filtered, and which way the
+/// estimator has the lid moving.
+///
+/// `LidMotion` averages its speed over readings, so on the first reading
+/// after a reversal it still has the lid opening, and the start waits for
+/// the next, a tenth of a second on. The estimator turns round at the
+/// reading that shows it. Nothing is carried on past the reading: a hand can
+/// stop short of the start angle between two readings, and only the next
+/// one shows it.
+struct LidApproach {
+    var angle: Double
+    /// Degrees per second, negative while the lid closes.
+    var speed: Double
+
+    var isClosing: Bool { speed <= -LidMotion.triggerClosingSpeed }
+    var isOpening: Bool { speed >= LidMotion.triggerOpeningSpeed }
+}
+
+extension LidApproach {
+    /// `nil` before the estimator has a reading.
+    init?(_ estimator: LidAngleEstimator) {
+        guard let latest = estimator.latest else { return nil }
+        self.init(angle: latest.angle, speed: latest.speed)
     }
 }
 
@@ -288,7 +301,7 @@ struct LidEffectPolicy {
         isEnabled: Bool,
         isActive: Bool,
         angle: Double,
-        predictedAngle: Double,
+        estimatedAngle: Double,
         riseSinceLowest: Double,
         hasBeenAboveThreshold: Bool,
         wasClosingRecently: Bool,
@@ -326,7 +339,7 @@ struct LidEffectPolicy {
         return hasBeenAboveThreshold
             && wasClosingRecently
             && !isClearlyOpening
-            && predictedAngle <= threshold
+            && estimatedAngle <= threshold
     }
 }
 
