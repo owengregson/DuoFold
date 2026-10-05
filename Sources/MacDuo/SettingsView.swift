@@ -138,7 +138,7 @@ struct SettingsView: View {
                 help: startAngleHelp
             )
             slider(
-                localized("Full effect after"), value: $preferences.blurSpan, in: 5...60, format: "%.0f°",
+                localized("Full effect after"), value: $preferences.blurSpan, in: 5...100, format: "%.0f°",
                 help: localized("Degrees of further closing to reach full strength.")
             )
             // The glass follows the lid's travel itself.
