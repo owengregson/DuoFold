@@ -699,7 +699,7 @@ final class LidController: ObservableObject {
         opensFromShut = false
         // A lid found already past the start angle has nothing to unwind.
         guard rawAngle < effectiveThreshold else { return }
-        Diagnostics.lid.notice("reopen: \(cause), raw \(self.rawAngle, format: .fixed(precision: 2))")
+        Diagnostics.lid.notice("reopen: \(cause, privacy: .public), raw \(self.rawAngle, format: .fixed(precision: 2))")
         // The shut lid's count starts over, or the next poll would end the
         // run again before a reading shows the lid open.
         shutHold.reset()
