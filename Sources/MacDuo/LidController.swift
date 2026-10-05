@@ -848,9 +848,12 @@ final class LidController: ObservableObject {
         startDisplayLink()
     }
 
+    private var ramp: LidEffectRamp {
+        LidEffectRamp(startAngle: effectiveThreshold, span: preferences.blurSpan)
+    }
+
     private func blurProgress(for angle: Double) -> Double {
-        let span = max(preferences.blurSpan, 1)
-        return min(max((effectiveThreshold - angle) / span, 0), 1)
+        ramp.progress(at: angle)
     }
 
     // MARK: - Haptics
@@ -943,10 +946,13 @@ final class LidController: ObservableObject {
         finishClosingOut()
     }
 
-    /// The geometry takes the lid angle itself, so only the blur saturates.
+    /// Past the full-effect angle the picture holds its lean along with its
+    /// blur and dimming. The glass has no full-effect angle: it follows the
+    /// lid's whole travel, so it takes the lid angle itself.
     private func applyVisual(angle: Double) {
         let progress = blurProgress(for: angle)
-        overlay.update(progress: progress, currentAngle: angle, tuning: tuning)
+        let pictureAngle = capturesScreen ? ramp.pictureAngle(for: angle) : angle
+        overlay.update(progress: progress, currentAngle: pictureAngle, tuning: tuning)
     }
 
     private var tuning: DepthTuning {
