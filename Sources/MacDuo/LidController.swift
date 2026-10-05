@@ -52,6 +52,7 @@ final class LidController: ObservableObject {
         }
     }
     private let wakePolicy = LidWakePolicy()
+    private let picturePolicy = LidPicturePolicy()
     private var pushInterval: TimeInterval = 0
     private var lastMovementAngle: Double = 0
     private var lastMovementTime: CFTimeInterval = 0
@@ -99,6 +100,8 @@ final class LidController: ObservableObject {
     /// The lowest reading since the effect started. Opening releases only
     /// once the lid has risen `LidEffectPolicy.minimumReleaseRise` above it.
     private var lowestRunAngle: Double = 0
+    /// Until the run's first frame with any effect, which is logged.
+    private var awaitsFirstEffect = false
 
     private static let idlePollInterval: TimeInterval = 1.0 / 8
     private static let activePollInterval: TimeInterval = 1.0 / 30
@@ -113,7 +116,6 @@ final class LidController: ObservableObject {
     /// How far a speed measured from two whole degree pushes can be off,
     /// squared: a degree's rounding over a tenth of a second.
     private static let pushedSpeedVariance: Double = 100
-    private static let fadeInDuration: TimeInterval = 0.07
     /// Degrees above the pre-warm zone at which polling speeds up.
     private static let fastPollMargin: Double = 20
 
@@ -124,8 +126,7 @@ final class LidController: ObservableObject {
     /// How long after the lid last moved down the effect may still start.
     private static let closingMemory: TimeInterval = 1.5
 
-    /// The ordinary hysteresis release waits this long. A prediction can fire
-    /// while the last reading is still above the trigger angle, but deliberate
+    /// The ordinary hysteresis release waits this long, but deliberate
     /// opening is allowed to release immediately.
     private static let minimumEffectDuration: TimeInterval = 0.35
 
@@ -226,11 +227,8 @@ final class LidController: ObservableObject {
         }
         // The glass captures nothing, so it never touches ScreenCaptureKit
         // and never asks for Screen Recording.
-        if capturesScreen {
-            warmCapture()
-        } else {
-            prepareGlass()
-        }
+        prepareGlass()
+        if capturesScreen { warmCapture() }
     }
 
     private func warmCapture() {
@@ -244,9 +242,10 @@ final class LidController: ObservableObject {
         }
     }
 
-    /// Has the glass built and waiting, hidden, for the next close.
+    /// Has the glass built and waiting, hidden, for the next close. In
+    /// capture mode too: it covers the start until the capture arrives.
     private func prepareGlass() {
-        guard !capturesScreen, let screen = NSScreen.builtIn else { return }
+        guard let screen = NSScreen.builtIn else { return }
         overlay.prepareGlass(on: screen)
     }
 
@@ -254,11 +253,20 @@ final class LidController: ObservableObject {
         Diagnostics.lid.notice("rendering switched, captures screen: \(self.capturesScreen)")
         stopEffectAndCapture()
         guard isSensorAvailable else { return }
-        if capturesScreen {
-            warmCapture()
-        } else {
-            prepareGlass()
-        }
+        prepareGlass()
+        if capturesScreen { warmCapture() }
+    }
+
+    /// Has the capture under way for a close that looks about to reach the
+    /// start angle: the stream takes 25 to 45 ms to start, and a screenshot
+    /// 50 to 75 ms to land. For the first reading that shows the lid
+    /// closing, ahead of the start decision. The pre-warm's own rules end
+    /// the capture if the close never comes, so only call it with a measured
+    /// closing speed, which sets the time they count from. The glass needs
+    /// no arming: it is built and waiting.
+    func armPicture() {
+        guard preferences.isEnabled, !isSuspended, !isActive, capturesScreen else { return }
+        warmPicture()
     }
 
     func stop() {
@@ -564,18 +572,21 @@ final class LidController: ObservableObject {
             return false
         }
 
+        // A start goes on the estimator, which turns round with the lid. The
+        // release keeps to the averaged speed its one-step rule is set for.
+        let approach = self.approach
         let wanted = policy.wantsEffect(
             isEnabled: preferences.isEnabled,
             isActive: isActive,
             angle: angle,
-            predictedAngle: motion.predictedAngle(from: rawAngle, at: now),
+            estimatedAngle: approach.angle,
             riseSinceLowest: angle - lowestRunAngle,
             hasBeenAboveThreshold: peakAngle >= threshold,
-            wasClosingRecently: motion.intent.wasClosingRecently(
+            wasClosingRecently: approach.isClosing || motion.intent.wasClosingRecently(
                 at: now,
                 memoryDuration: Self.closingMemory
             ),
-            isClearlyOpening: motion.isClearlyOpening,
+            isClearlyOpening: isActive ? motion.isClearlyOpening : approach.isOpening,
             hasDwelledOpen: openDwell.hasDwelled(at: now, duration: Self.openDwellDuration),
             minimumDurationElapsed: minimumDurationElapsed,
             hasHeldShut: shutHold.hasHeld(at: now)
@@ -597,6 +608,11 @@ final class LidController: ObservableObject {
         return wanted
     }
 
+    /// What a start goes on.
+    private var approach: LidApproach {
+        LidApproach(estimator) ?? LidApproach(angle: rawAngle, speed: motion.velocity)
+    }
+
     /// True once the angle has held within `timeoutMovementThreshold` of its
     /// last significant position for `timeoutStillDuration`.
     private func isPastTimeout(angle: Double) -> Bool {
@@ -616,11 +632,12 @@ final class LidController: ObservableObject {
         guard preferences.isEnabled, !isSuspended else { return }
         let wanted = wantsEffect(angle: angle)
         if wanted != isActive {
-            let predicted = motion.predictedAngle(from: rawAngle, at: CACurrentMediaTime())
+            let approach = self.approach
             Diagnostics.lid.notice(
                 """
                 \(wanted ? "start" : "end", privacy: .public) raw \(angle, format: .fixed(precision: 2)) \
-                predicted \(predicted, format: .fixed(precision: 2)) \
+                estimate \(approach.angle, format: .fixed(precision: 2)) \
+                at \(approach.speed, format: .fixed(precision: 1)) deg/s, \
                 velocity \(self.motion.velocity, format: .fixed(precision: 1)) deg/s \
                 snapshot \(self.snapshotter.latestImage != nil)
                 """
@@ -651,6 +668,11 @@ final class LidController: ObservableObject {
             overlay.discardLive()
             return
         }
+        warmPicture()
+    }
+
+    /// Starts the capture the picture will be drawn from, or keeps it going.
+    private func warmPicture() {
         guard preferences.isLivePicture else {
             streamer.stop()
             overlay.discardLive()
@@ -687,6 +709,12 @@ final class LidController: ObservableObject {
                 timeoutReferenceTime = startedAt
             }
             visualAngle.reset(to: rawAngle)
+            // What is on screen as a run starts is nothing, or the ease back
+            // to flat, never the estimator's picture. The run starts where the
+            // lid is, rather than easing in from where that picture rested or
+            // ran on past a reversal.
+            estimator.rejoin(at: startedAt)
+            awaitsFirstEffect = true
             snapshotter.endPrewarm()
             setPollInterval(Self.activePollInterval)
             beginHaptics()
@@ -725,40 +753,42 @@ final class LidController: ObservableObject {
         setActive(false)
     }
 
-    /// Shows the held screenshot, or waits for one. A pre-warm capture that is
-    /// already running counts as that wait.
+    /// Puts the effect up as `LidPicturePolicy` plans it: the glass at once
+    /// where it can be, and the captured picture over it once there is one.
+    /// The next sample tries again if nothing could go up yet.
     private func presentPicture() {
-        guard preferences.isEnabled, !isSuspended, isActive else { return }
-        guard capturesScreen else {
-            // The next sample tries again if the glass cannot go up yet.
-            if let screen = NSScreen.builtIn,
-               overlay.showGlass(on: screen, startAngle: effectiveThreshold, tuning: tuning) {
+        guard preferences.isEnabled, !isSuspended, isActive, let screen = NSScreen.builtIn else { return }
+        let plan = picturePlan
+        if plan.first != .pictureAlone {
+            guard overlay.showGlass(on: screen, startAngle: effectiveThreshold, tuning: tuning) else { return }
+            if plan.first == .glass {
                 startDisplayLink()
+                return
             }
-            return
         }
-        if preferences.isLivePicture, let screen = NSScreen.builtIn,
-           overlay.showLive(
-               on: screen,
-               startAngle: effectiveThreshold,
-               tuning: tuning,
-               fadeIn: Self.fadeInDuration
-           ) {
+        if preferences.isLivePicture {
+            // Now rather than at the next sample, which would be 30 ms on.
+            streamer.start()
+            guard overlay.showLive(on: screen, startAngle: effectiveThreshold, tuning: tuning, fadeIn: plan.fadeIn) else {
+                // The glass, if it went up, is the run.
+                if overlay.isVisible { startDisplayLink() }
+                return
+            }
             startDisplayLink()
             if let frame = streamer.newFrame() {
                 Diagnostics.lid.notice("present: live, a stream frame was ready")
                 overlay.absorb(frame)
-                return
-            }
-            // A fast close can reach the trigger angle before the stream has a
-            // frame. One screenshot starts the picture off.
-            if let image = snapshotter.latestImage {
+            } else if !plan.seedsFromScreenshot {
+                Diagnostics.lid.notice("present: live over the glass, waiting for the stream")
+            } else if let image = snapshotter.latestImage {
+                // A fast close can reach the trigger angle before the stream
+                // has a frame. One screenshot starts the picture off.
                 Diagnostics.lid.notice("present: live, seeding from the pre-warm screenshot")
                 overlay.seed(image: image)
-                return
+            } else {
+                Diagnostics.lid.notice("present: live, no picture yet, asking for a screenshot")
+                requestSeed()
             }
-            Diagnostics.lid.notice("present: live, no picture yet, asking for a screenshot")
-            requestSeed()
             return
         }
 
@@ -766,6 +796,9 @@ final class LidController: ObservableObject {
             show(image: image, on: screen)
             return
         }
+        // The glass, if it went up, follows the lid while the screenshot
+        // is taken.
+        if overlay.isVisible { startDisplayLink() }
         isCapturePending = true
         pictureTask?.cancel()
         pictureTask = Task { [weak self] in
@@ -780,11 +813,20 @@ final class LidController: ObservableObject {
                 on \(self.isActive) overlay \(self.overlay.isVisible)
                 """
             )
-            guard self.isActive, !self.overlay.isVisible,
+            guard self.isActive, !self.overlay.showsCapturedPicture,
                   let image = self.snapshotter.latestImage,
                   let screen = self.snapshotter.latestScreen else { return }
             self.show(image: image, on: screen)
         }
+    }
+
+    private var picturePlan: LidPicturePolicy.Plan {
+        picturePolicy.plan(
+            capturesScreen: capturesScreen,
+            isGlassAvailable: WindowServerBlur.isAvailable,
+            isLivePicture: preferences.isLivePicture,
+            hasStreamFrame: streamer.hasFrame
+        )
     }
 
     /// Takes one screenshot to start a live overlay that has nothing to show
@@ -818,7 +860,7 @@ final class LidController: ObservableObject {
             on: screen,
             startAngle: effectiveThreshold,
             tuning: tuning,
-            fadeIn: Self.fadeInDuration
+            fadeIn: picturePlan.fadeIn
         )
         // The link belongs to the overlay window.
         startDisplayLink()
@@ -921,6 +963,16 @@ final class LidController: ObservableObject {
             }
             applyVisual(angle: visualAngle.value)
             followHaptics(angle: visualAngle.value)
+            if awaitsFirstEffect, isActive, blurProgress(for: visualAngle.value) > 0 {
+                awaitsFirstEffect = false
+                Diagnostics.lid.notice(
+                    """
+                    first effect frame shows \((link.targetTimestamp - self.startedAt) * 1000, format: .fixed(precision: 0)) ms \
+                    after the start, at \(self.visualAngle.value, format: .fixed(precision: 2)), \
+                    picture ready \(self.overlay.isPictureReady)
+                    """
+                )
+            }
             return
         }
         let target = effectiveThreshold

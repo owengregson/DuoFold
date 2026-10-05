@@ -106,6 +106,15 @@ final class DepthOverlay {
     private var glassView: FrostedGlassView?
     /// True while the run on screen is the glass rather than the renderer.
     private var showsGlass = false
+    /// The glass while it stands in for a picture still on its way: up at
+    /// once under the picture's window, following the lid, and down once
+    /// the picture has drawn over it. `LidPicturePolicy` decides when a run
+    /// starts this way.
+    private var bridge: OverlayWindow?
+    private var glassShownAt: CFTimeInterval = 0
+    private var handover = GlassHandover()
+    /// Eases the picture from flat, as the glass had it, into the lid's lean.
+    private var leanCatchUp = LidLeanCatchUp()
 
     private var screenSize: CGSize = .zero
     private var startAngle: Double = 90
@@ -116,10 +125,13 @@ final class DepthOverlay {
     private var hasRevealed = false
 
     var isVisible: Bool { window != nil }
-    /// True once the picture has faded in over the screen. A live window
-    /// waits transparent for its first frame, and that hides nothing.
-    var isRevealed: Bool { window != nil && hasRevealed }
+    /// True once the picture has faded in over the screen, or the glass
+    /// stands in for it. A live window waits transparent for its first
+    /// frame, and that hides nothing.
+    var isRevealed: Bool { (window != nil && hasRevealed) || bridge != nil }
     var isPictureReady: Bool { showsGlass || (renderer?.isReady ?? false) }
+    /// True once a window for the captured picture is up, ready or not.
+    var showsCapturedPicture: Bool { window != nil && !showsGlass }
     var hostWindow: NSWindow? { window }
 
     @discardableResult
@@ -158,7 +170,8 @@ final class DepthOverlay {
     }
 
     /// Puts up a window for a live stream. It stays transparent until the
-    /// first frame is absorbed.
+    /// first frame is absorbed. A glass already showing stays up under it
+    /// until then.
     @discardableResult
     func showLive(
         on screen: NSScreen,
@@ -166,18 +179,57 @@ final class DepthOverlay {
         tuning: DepthTuning,
         fadeIn: TimeInterval
     ) -> Bool {
-        dismiss(animated: false)
-        guard warmUp(), let renderer else { return false }
+        carryGlassUnderPicture()
+        guard warmUp(), let renderer else {
+            restoreGlassFromBridge()
+            return false
+        }
         self.startAngle = startAngle
         self.tuning = tuning
         self.fadeIn = fadeIn
         screenSize = screen.frame.size
 
         let pixelScale = Double(screen.backingScaleFactor)
-        guard renderer.beginLive(screenSize: screenSize, pixelScale: CGFloat(pixelScale)) else { return false }
+        guard renderer.beginLive(screenSize: screenSize, pixelScale: CGFloat(pixelScale)) else {
+            restoreGlassFromBridge()
+            return false
+        }
         buildToken += 1
         makeWindow(on: screen, pixelScale: pixelScale)
+        if window == nil { restoreGlassFromBridge() }
         return window != nil
+    }
+
+    /// Takes the run's windows down the way `dismiss` does, except a glass
+    /// that is showing, which stays up as the bridge under the picture's
+    /// window about to go up.
+    private func carryGlassUnderPicture() {
+        guard showsGlass, let glassWindow, window === glassWindow else {
+            dismiss(animated: false)
+            return
+        }
+        closeFadingWindow()
+        leanCatchUp.reset()
+        bridge = glassWindow
+        window = nil
+        showsGlass = false
+        buildToken += 1
+        renderer?.release()
+    }
+
+    /// A picture window that could not go up leaves the glass as the run.
+    private func restoreGlassFromBridge() {
+        guard let bridge else { return }
+        self.bridge = nil
+        window = bridge
+        showsGlass = true
+        hasRevealed = true
+    }
+
+    private func takeDownBridge() {
+        guard let bridge else { return }
+        self.bridge = nil
+        takeDown(bridge)
     }
 
     /// Hands one live frame to the renderer and reveals the window once the
@@ -206,7 +258,7 @@ final class DepthOverlay {
            glassView?.layer?.contentsScale == screen.backingScaleFactor { return }
         if let old = glassWindow {
             // One on screen finishes its run first; the next run rebuilds.
-            guard window !== old else { return }
+            guard window !== old, bridge !== old else { return }
             if fadingWindow === old { fadingWindow = nil }
             old.orderOut(nil)
             old.close()
@@ -237,6 +289,7 @@ final class DepthOverlay {
         showsGlass = true
         window = glassWindow
         hasRevealed = true
+        glassShownAt = CACurrentMediaTime()
         update(progress: 0, currentAngle: startAngle, tuning: tuning)
         // Takes over from a fade out that may still be running.
         NSAnimationContext.runAnimationGroup { context in
@@ -256,11 +309,14 @@ final class DepthOverlay {
         tuning: DepthTuning,
         fadeIn: TimeInterval
     ) {
-        dismiss(animated: false)
+        carryGlassUnderPicture()
         // The screenshot's screen can be stale once the lid shuts into
         // clamshell mode, so no window goes up at its old frame.
-        guard let displayID = screen.displayID, displayID == NSScreen.builtIn?.displayID else { return }
-        guard warmUp(), let renderer else { return }
+        guard let displayID = screen.displayID, displayID == NSScreen.builtIn?.displayID,
+              warmUp(), let renderer else {
+            restoreGlassFromBridge()
+            return
+        }
         self.startAngle = startAngle
         self.tuning = tuning
         self.fadeIn = fadeIn
@@ -271,7 +327,10 @@ final class DepthOverlay {
             : Double(screen.backingScaleFactor)
 
         makeWindow(on: screen, pixelScale: pixelScale)
-        guard let window else { return }
+        guard let window else {
+            restoreGlassFromBridge()
+            return
+        }
 
         buildToken += 1
         let token = buildToken
@@ -327,10 +386,18 @@ final class DepthOverlay {
     }
 
     /// Fades the window in once, and only once the picture has something to
-    /// draw.
+    /// draw. The picture starts flat and eases into the lid's lean from here.
     private func reveal() {
         guard let window, !hasRevealed, renderer?.isReady == true else { return }
         hasRevealed = true
+        let now = CACurrentMediaTime()
+        leanCatchUp.begin(at: now)
+        if bridge != nil {
+            handover = GlassHandover()
+            Diagnostics.geometry.notice(
+                "picture took over from the glass \((now - self.glassShownAt) * 1000, format: .fixed(precision: 0)) ms after it went up"
+            )
+        }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = fadeIn
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -339,19 +406,18 @@ final class DepthOverlay {
     }
 
     func update(progress: Double, currentAngle: Double, tuning: DepthTuning) {
-        if showsGlass, let glassView {
-            // The glass cannot lean, so it takes only the blur and dimming
-            // the captured picture gets at this point of the travel.
-            self.tuning = tuning
-            glassView.apply(progress: progress, tuning: tuning, gradient: gradient)
-            return
-        }
-        guard let renderer, renderer.isReady else { return }
         self.tuning = tuning
+        if showsGlass || bridge != nil, let glassView {
+            // The glass cannot lean, so it takes only the blur and dimming
+            // the captured picture gets at this point of the travel. As the
+            // bridge it keeps following the lid until the picture is over it.
+            glassView.apply(progress: progress, tuning: tuning, gradient: gradient)
+        }
+        guard !showsGlass, let renderer, renderer.isReady else { return }
         renderer.render(
             corners: geometry.corners(
                 startAngle: startAngle,
-                currentAngle: currentAngle,
+                currentAngle: leanCatchUp.pictureAngle(currentAngle, startAngle: startAngle, at: CACurrentMediaTime()),
                 viewingDistanceRatio: tuning.viewingDistance,
                 recession: tuning.recession,
                 screenSize: screenSize
@@ -364,10 +430,26 @@ final class DepthOverlay {
             maxBlurRadius: tuning.maxBlurRadius,
             maxDim: tuning.maxDim
         )
+        if hasRevealed, bridge != nil {
+            handover.drewFrame()
+            if handover.isComplete { takeDownBridge() }
+        }
     }
 
     func dismiss(animated: Bool, duration: TimeInterval = 0.22) {
         closeFadingWindow()
+        leanCatchUp.reset()
+        if let bridge {
+            self.bridge = nil
+            if let picture = window, !hasRevealed {
+                // The picture never showed. Its window goes at once, and the
+                // glass, which is what the screen shows, is the one to fade.
+                takeDown(picture)
+                window = bridge
+            } else {
+                takeDown(bridge)
+            }
+        }
         guard let window else { return }
         self.window = nil
         buildToken += 1

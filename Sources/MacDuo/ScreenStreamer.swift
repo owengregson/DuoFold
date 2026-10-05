@@ -95,6 +95,8 @@ final class ScreenStreamer {
     private var filterDisplayID: CGDirectDisplayID?
     private var consumedID: UInt64 = 0
     private var lastHandOver: CFTimeInterval = 0
+    /// When `start()` was called, for the time to the first frame.
+    private var askedAt: CFTimeInterval = 0
 
     /// Frames are handed over no faster than a little above the rate the
     /// stream asked for. A starting stream delivers a burst well above it.
@@ -113,6 +115,7 @@ final class ScreenStreamer {
         guard let target = NSScreen.builtIn, let displayID = target.displayID else { return }
         screen = target
         isStarted = true
+        askedAt = CACurrentMediaTime()
         startTask = Task { [weak self] in
             await self?.begin(displayID: displayID, on: target)
             guard !Task.isCancelled else { return }
@@ -148,12 +151,20 @@ final class ScreenStreamer {
         filterDisplayID = nil
     }
 
+    /// Whether a frame has arrived, taken or not.
+    var hasFrame: Bool { receiver?.latest() != nil }
+
     /// The newest frame, but only once. `nil` when nothing new has arrived
     /// since the last call.
     func newFrame() -> CapturedFrame? {
         let now = CACurrentMediaTime()
         guard now - lastHandOver >= minimumHandOverInterval else { return nil }
         guard let latest = receiver?.latest(), latest.id != consumedID else { return nil }
+        if consumedID == 0 {
+            Diagnostics.geometry.notice(
+                "first stream frame taken \((now - self.askedAt) * 1000, format: .fixed(precision: 0)) ms after the stream was asked for"
+            )
+        }
         consumedID = latest.id
         lastHandOver = now
         return latest.frame

@@ -45,6 +45,7 @@ struct LidShutTests {
         for readings: [(time: Double, angle: Double)]
     ) -> [(time: Double, angle: Double, active: Bool)] {
         var motion = LidMotion()
+        var estimator = LidAngleEstimator(tuning: .sensor(resolution: 0.01))
         var dwell = LidOpenDwell()
         var shut = LidShutHold()
         var latch = LidReopenLatch()
@@ -54,19 +55,21 @@ struct LidShutTests {
         for (now, angle) in readings {
             peak = max(peak, angle)
             if isActive { lowest = min(lowest, angle) }
+            estimator.observe(angle, at: now)
             motion.update(with: angle, at: now, prewarmSpeed: 8)
             dwell.update(angle: angle, at: now, dwellAngle: policy.dwellAngle)
             shut.update(angle: angle, at: now)
             if !isActive, !latch.allowsStart(angle: angle, threshold: policy.threshold) { continue }
+            let approach = LidApproach(estimator) ?? LidApproach(angle: angle, speed: motion.velocity)
             let wanted = policy.wantsEffect(
                 isEnabled: true,
                 isActive: isActive,
                 angle: angle,
-                predictedAngle: motion.predictedAngle(from: angle, at: now),
+                estimatedAngle: approach.angle,
                 riseSinceLowest: angle - lowest,
                 hasBeenAboveThreshold: peak >= policy.threshold,
-                wasClosingRecently: motion.intent.wasClosingRecently(at: now, memoryDuration: 1.5),
-                isClearlyOpening: motion.isClearlyOpening,
+                wasClosingRecently: approach.isClosing || motion.intent.wasClosingRecently(at: now, memoryDuration: 1.5),
+                isClearlyOpening: isActive ? motion.isClearlyOpening : approach.isOpening,
                 hasDwelledOpen: dwell.hasDwelled(at: now, duration: 1),
                 minimumDurationElapsed: now - startedAt > 0.35,
                 hasHeldShut: shut.hasHeld(at: now)
@@ -259,7 +262,7 @@ struct LidShutTests {
                 lowest = min(lowest, angle)
                 let wanted = policy.wantsEffect(
                     isEnabled: true, isActive: isActive, angle: angle,
-                    predictedAngle: motion.predictedAngle(from: angle, at: now),
+                    estimatedAngle: angle,
                     riseSinceLowest: angle - lowest, hasBeenAboveThreshold: true,
                     wasClosingRecently: false, isClearlyOpening: motion.isClearlyOpening,
                     hasDwelledOpen: false, minimumDurationElapsed: true
