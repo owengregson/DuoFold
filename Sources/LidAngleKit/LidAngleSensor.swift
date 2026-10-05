@@ -13,7 +13,9 @@ import IOKit.hid
 /// - Report 7: 5 bytes `[0x07, b0, b1, b2, b3]`, little-endian hundredths of a
 ///   degree. Not every model declares it, so report 1 is the fallback.
 ///
-/// The value refreshes about every 100 ms and needs no permission.
+/// A lid pressed shut reports just under 360 in either, which reads back as
+/// just under 0. The value refreshes about every 100 ms and needs no
+/// permission.
 ///
 /// Reading a report is a round trip to the sensor coprocessor, so a watcher
 /// that polls to notice the lid starting to move keeps waking the CPU. The
@@ -91,7 +93,8 @@ public final class LidAngleSensor {
 
     /// The current lid angle in degrees, or `nil` if the read failed.
     ///
-    /// 0 means closed. A MacBook opens to roughly 130 degrees.
+    /// 0 means closed, and a lid pressed shut reads a degree or so below it.
+    /// A MacBook opens to roughly 130 degrees.
     public func angle() -> Double? {
         guard let resolution else { return nil }
         guard let bytes = read(reportID: resolution.reportID) else { return nil }
@@ -111,11 +114,24 @@ public final class LidAngleSensor {
             degrees = Double(UInt16(bytes[1]) | UInt16(bytes[2]) << 8)
         }
 
-        guard degrees >= 0, degrees <= 360 else {
+        guard let angle = Self.hingeAngle(fromReported: degrees) else {
             lastRead.rejectedDegrees = degrees
             return nil
         }
-        return degrees
+        return angle
+    }
+
+    /// The hinge angle a report's value stands for, or `nil` for a value no
+    /// report holds.
+    ///
+    /// Reports count round from 0 to 360, and a lid pressed shut sits a hair
+    /// past closed, which reads just under 360. No hinge opens past 180, so a
+    /// value nearer 360 than 180 is that angle below zero. Taken as it stands,
+    /// a lid snapping shut would read as one flung open, and one opening from
+    /// shut as one slammed closed.
+    public static func hingeAngle(fromReported degrees: Double) -> Double? {
+        guard degrees >= 0, degrees <= 360 else { return nil }
+        return degrees > 270 ? degrees - 360 : degrees
     }
 
     // MARK: - Pushed readings
@@ -168,14 +184,15 @@ public final class LidAngleSensor {
     private static let pushCallback: IOHIDReportCallback = { context, result, _, _, reportID, report, length in
         guard let context, result == kIOReturnSuccess, reportID == 1, length >= 3 else { return }
         let degrees = Double(UInt16(report[1]) | UInt16(report[2]) << 8)
-        guard degrees <= 360 else { return }
-        Unmanaged<PushReceiver>.fromOpaque(context).takeUnretainedValue().deliver(degrees)
+        guard let angle = LidAngleSensor.hingeAngle(fromReported: degrees) else { return }
+        Unmanaged<PushReceiver>.fromOpaque(context).takeUnretainedValue().deliver(angle)
     }
 
-    /// Starts the sensor pushing whole degree readings to `handler` on
-    /// `queue`, about `interval` apart. Returns false when the sensor cannot
-    /// be told how often to push, and the caller has to poll: once a second
-    /// is too slow to notice the lid starting to close.
+    /// Starts the sensor pushing whole degree readings, read as `angle()`
+    /// reads them, to `handler` on `queue`, about `interval` apart. Returns
+    /// false when the sensor cannot be told how often to push, and the caller
+    /// has to poll: once a second is too slow to notice the lid starting to
+    /// close.
     ///
     /// Pushing can start once per sensor. The interval outlives the process,
     /// so `stopPushing`, or `restorePushInterval` while the Mac sleeps, must
