@@ -104,6 +104,12 @@ final class DepthOverlay {
     /// waiting for a new window.
     private var glassWindow: OverlayWindow?
     private var glassView: FrostedGlassView?
+    /// Black under the glass while the window server warps the glass's
+    /// window (`WindowWarp`): what the leaning window leaves uncovered is the
+    /// black beyond the captured picture's margin.
+    private var glassSurround: OverlayWindow?
+    /// The glass's screen, for the warp's global coordinates.
+    private var screenFrame: CGRect = .zero
     /// True while the run on screen is the glass rather than the renderer.
     private var showsGlass = false
     /// The glass while it stands in for a picture still on its way: up at
@@ -132,7 +138,7 @@ final class DepthOverlay {
     var isPictureReady: Bool { showsGlass || (renderer?.isReady ?? false) }
     /// True while leaning glass is on screen, which needs drawing on every
     /// frame even when nothing of the effect changes (`refreshGlass`).
-    var glassNeedsEveryFrame: Bool { (showsGlass || bridge != nil) && glassView?.needsEveryFrame == true }
+    var glassNeedsEveryFrame: Bool { (showsGlass || bridge != nil) && glassView?.needsEveryFrame == true && !WindowWarp.isWanted }
     /// True once a window for the captured picture is up, ready or not.
     var showsCapturedPicture: Bool { window != nil && !showsGlass }
     var hostWindow: NSWindow? { window }
@@ -263,8 +269,11 @@ final class DepthOverlay {
             // One on screen finishes its run first; the next run rebuilds.
             guard window !== old, bridge !== old else { return }
             if fadingWindow === old { fadingWindow = nil }
+            WindowWarp.apply(nil, to: old)
             old.orderOut(nil)
             old.close()
+            glassSurround?.close()
+            glassSurround = nil
         }
         let view = FrostedGlassView(
             frame: NSRect(origin: .zero, size: screen.frame.size),
@@ -275,6 +284,16 @@ final class DepthOverlay {
         window.alphaValue = 0
         glassView = view
         glassWindow = window
+        if WindowWarp.isWanted {
+            let black = NSView(frame: NSRect(origin: .zero, size: screen.frame.size))
+            black.wantsLayer = true
+            black.layer?.backgroundColor = CGColor(gray: 0, alpha: 1)
+            let surround = makeOverlayWindow(on: screen, contentView: black)
+            surround.alphaValue = 0
+            // A child goes wherever its parent is ordered, and under it.
+            window.addChildWindow(surround, ordered: .below)
+            glassSurround = surround
+        }
     }
 
     /// Shows the glass, through which the window server blurs and dims
@@ -288,6 +307,7 @@ final class DepthOverlay {
         self.startAngle = startAngle
         self.tuning = tuning
         screenSize = screen.frame.size
+        screenFrame = screen.frame
         buildToken += 1
         showsGlass = true
         window = glassWindow
@@ -298,10 +318,23 @@ final class DepthOverlay {
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0
             glassWindow.animator().alphaValue = 1
+            glassSurround?.animator().alphaValue = 1
         }
         glassWindow.alphaValue = 1
+        glassSurround?.alphaValue = 1
         glassWindow.orderFrontRegardless()
         return true
+    }
+
+    /// Hands the lean to the window server as a warp of the glass's whole
+    /// window, the glass itself lying flat inside (`WindowWarp`).
+    private func warpGlassWindow(_ lean: GlassLean) {
+        guard WindowWarp.isWanted, let glassWindow else { return }
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? screenFrame.maxY
+        WindowWarp.apply(
+            lean.isFlat ? nil : WindowWarp.mesh(lean: lean, screen: screenFrame, primaryHeight: primaryHeight, rows: WindowWarp.rows),
+            to: glassWindow
+        )
     }
 
 
@@ -430,16 +463,18 @@ final class DepthOverlay {
             // this point of the travel. As the bridge it keeps following the
             // lid until the picture is over it.
             let scale = glassView.layer?.contentsScale ?? 2
-            glassView.apply(
-                progress: progress,
-                tuning: tuning,
-                gradient: gradient,
-                lean: GlassLean(
-                    corners: corners,
-                    screenSize: screenSize,
-                    padded: DepthRenderer.paddedFrame(screenSize: screenSize, pixelScale: scale)
-                )
+            let lean = GlassLean(
+                corners: corners,
+                screenSize: screenSize,
+                padded: DepthRenderer.paddedFrame(screenSize: screenSize, pixelScale: scale)
             )
+            if WindowWarp.isWanted {
+                // Flat inside; the window server leans the window.
+                glassView.apply(progress: progress, tuning: tuning, gradient: gradient, lean: nil, backsWithScreen: !lean.isFlat)
+                warpGlassWindow(lean)
+            } else {
+                glassView.apply(progress: progress, tuning: tuning, gradient: gradient, lean: lean)
+            }
         }
         guard !showsGlass, let renderer, renderer.isReady else { return }
         renderer.render(
@@ -488,6 +523,7 @@ final class DepthOverlay {
             context.duration = duration
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             window.animator().alphaValue = 0
+            if window === glassWindow { glassSurround?.animator().alphaValue = 0 }
         } completionHandler: { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else {
@@ -513,6 +549,11 @@ final class DepthOverlay {
     /// The glass is hidden and kept for the next run; any other window goes.
     private func takeDown(_ window: OverlayWindow) {
         window.orderOut(nil)
-        if window !== glassWindow { window.close() }
+        if window !== glassWindow {
+            window.close()
+        } else if WindowWarp.isWanted {
+            WindowWarp.apply(nil, to: window)
+            glassSurround?.alphaValue = 0
+        }
     }
 }
