@@ -57,11 +57,16 @@ struct WindowServerBlurTests {
         }
         // The darkening layer, above the bands, covers the glass and darkens
         // from the hinge up.
-        let shade = try #require(visible().last as? CAGradientLayer)
+        let gradients = visible().compactMap { $0 as? CAGradientLayer }
+        let shade = try #require(gradients.first { $0.startPoint == CGPoint(x: 0.5, y: 0) })
         #expect(shade.frame == view.bounds)
         #expect(shade.startPoint == CGPoint(x: 0.5, y: 0) && shade.endPoint == CGPoint(x: 0.5, y: 1))
         let alphas = try #require(shade.colors as? [CGColor]).map(\.alpha)
         #expect(alphas.first! < alphas.last!)
+        // The screen's edges darken into the black margin around it, as the
+        // captured picture's blur takes the margin in: left, right and top,
+        // and the hinge where its blur reaches.
+        #expect(gradients.filter { $0.startPoint == CGPoint(x: 0, y: 0.5) }.count >= 3)
 
         // Back at the start angle, everything hides and the screen shows as
         // it is.
