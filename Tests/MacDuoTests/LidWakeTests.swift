@@ -70,9 +70,18 @@ struct LidWakeTests {
         #expect(!needs(isActive: false, capturesScreen: true))
         #expect(needs(isActive: true, isTimeoutEnabled: true))
         #expect(needs(isActive: true, isPictureSettled: false))
-        // Counting a shut lid to the end of its run.
+        // Counting a shut lid to parking its run.
         #expect(needs(isActive: true, isShut: true))
         #expect(!needs(isActive: false, isShut: true))
+    }
+
+    @Test
+    func testARunParkedOnAShutLidWaitsForThePushes() {
+        // Nothing to draw or capture, and the flicker of a shut lid is no
+        // reason to poll.
+        #expect(!needs(isActive: true, capturesScreen: true, isTimeoutEnabled: true, isShut: true, isParked: true, isPictureSettled: false, sinceMovement: 0.1))
+        // The settings panel still shows the live angle.
+        #expect(needs(isPanelOpen: true, isActive: true, isShut: true, isParked: true))
     }
 
     @Test
@@ -109,6 +118,7 @@ struct LidWakeTests {
         capturesScreen: Bool = false,
         isTimeoutEnabled: Bool = false,
         isShut: Bool = false,
+        isParked: Bool = false,
         isPictureSettled: Bool = true,
         sinceMovement: Double = 10
     ) -> Bool {
@@ -122,6 +132,7 @@ struct LidWakeTests {
             capturesScreen: capturesScreen,
             isTimeoutEnabled: isTimeoutEnabled,
             isShut: isShut,
+            isParked: isParked,
             isPictureSettled: isPictureSettled,
             sinceMovement: sinceMovement
         )

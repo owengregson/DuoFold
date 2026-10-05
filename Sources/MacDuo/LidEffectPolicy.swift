@@ -150,14 +150,14 @@ struct LidOpenDwell {
 }
 
 /// How long the lid has stayed pressed shut. Nobody looks at a shut screen,
-/// so a run held shut long enough ends, and opening the lid shows the
-/// screen as it is.
+/// so a run held shut long enough takes its picture down, and puts it back
+/// up as the lid opens, so the opening still plays.
 struct LidShutHold {
     /// A lid at or below this is shut. Pressed shut it reads about a degree
     /// below zero, and resting there it creeps up to half a degree above.
     static let shutAngle: Double = 1
 
-    /// How long the lid stays shut before the run ends.
+    /// How long the lid stays shut before the picture comes down.
     static let duration: TimeInterval = 2
 
     private(set) var since: TimeInterval?
@@ -307,15 +307,11 @@ struct LidEffectPolicy {
         wasClosingRecently: Bool,
         isClearlyOpening: Bool,
         hasDwelledOpen: Bool,
-        minimumDurationElapsed: Bool,
-        hasHeldShut: Bool = false
+        minimumDurationElapsed: Bool
     ) -> Bool {
         guard isEnabled else { return false }
 
         if isActive {
-            // A lid held shut ends the run, whatever the timeout is set to.
-            if hasHeldShut { return false }
-
             // Deliberately opening back across the configured start angle is
             // sufficient to recover even when threshold + hysteresis cannot
             // be reached by the hardware. The rise rules out a single
