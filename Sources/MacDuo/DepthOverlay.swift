@@ -130,6 +130,9 @@ final class DepthOverlay {
     /// frame, and that hides nothing.
     var isRevealed: Bool { (window != nil && hasRevealed) || bridge != nil }
     var isPictureReady: Bool { showsGlass || (renderer?.isReady ?? false) }
+    /// True while leaning glass is on screen, which needs drawing on every
+    /// frame even when nothing of the effect changes (`refreshGlass`).
+    var glassNeedsEveryFrame: Bool { (showsGlass || bridge != nil) && glassView?.needsEveryFrame == true }
     /// True once a window for the captured picture is up, ready or not.
     var showsCapturedPicture: Bool { window != nil && !showsGlass }
     var hostWindow: NSWindow? { window }
@@ -404,6 +407,13 @@ final class DepthOverlay {
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().alphaValue = 1
         }
+    }
+
+    /// Has the window server draw the whole glass again, for a frame that
+    /// changes nothing of it (`FrostedGlassView.refresh`).
+    func refreshGlass() {
+        guard showsGlass || bridge != nil else { return }
+        glassView?.refresh()
     }
 
     func update(progress: Double, currentAngle: Double, tuning: DepthTuning) {

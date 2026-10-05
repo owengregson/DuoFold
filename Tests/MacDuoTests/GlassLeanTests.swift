@@ -192,6 +192,30 @@ extension GlassLeanTests {
     }
 }
 
+extension GlassLeanTests {
+
+    /// Leaning glass is drawn whole on every frame; flat glass is left to
+    /// the window server's own redrawing, which suits it.
+    @Test
+    func testOnlyLeaningGlassAsksForEveryFrame() throws {
+        let view = FrostedGlassView(frame: NSRect(origin: .zero, size: Self.screen), scale: 2)
+        let tuning = DepthTuning(blurEvenness: 0.1, dimReach: 0.6, maxBlurRadius: 40, maxDim: 0.8)
+        view.apply(progress: 0.5, tuning: tuning, gradient: BlurGradient())
+        #expect(!view.needsEveryFrame)
+        view.apply(progress: 0.5, tuning: tuning, gradient: BlurGradient(), lean: Self.lean(progress: 0.5))
+        #expect(view.needsEveryFrame)
+        // Each refresh changes the layer under the glass, by too little to see.
+        let base = try #require(view.layer?.sublayers?.first { NSStringFromClass(type(of: $0)) == "CABackdropLayer" && !$0.isHidden })
+        var opacities: [Float] = []
+        for _ in 0..<3 {
+            view.refresh()
+            opacities.append(base.opacity)
+        }
+        #expect(opacities[0] != opacities[1] && opacities[1] != opacities[2])
+        #expect(opacities.allSatisfy { $0 > 0.9999 })
+    }
+}
+
 private extension Array where Element == GlassLean.Vertex {
     func picture(_ index: Int) -> CGPoint { self[index].picture }
 }

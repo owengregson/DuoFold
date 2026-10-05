@@ -524,8 +524,9 @@ final class LidController: ObservableObject {
         pollTimer = nil
         pollInterval = 0
         // A still picture needs no frames: the window server keeps the glass
-        // live. A wake restarts the link through `reconcile`.
-        stopDisplayLink()
+        // live, unless it leans, when every frame has to draw all of it. A
+        // wake restarts the link through `reconcile`.
+        if !overlay.glassNeedsEveryFrame { stopDisplayLink() }
         pushWatch.sleep(at: angle)
         let interval = wakePolicy.pushInterval(isEnabled: preferences.isEnabled)
         if interval != pushInterval {
@@ -1088,6 +1089,7 @@ final class LidController: ObservableObject {
     private func applyVisual(angle: Double) {
         let progress = blurProgress(for: angle)
         overlay.update(progress: progress, currentAngle: ramp.pictureAngle(for: angle), tuning: tuning)
+        overlay.refreshGlass()
     }
 
     private var tuning: DepthTuning {
