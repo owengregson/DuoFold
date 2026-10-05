@@ -9,9 +9,10 @@ import Foundation
 ///
 /// Band `i` is fully opaque at its knot, where its radius is exactly the blur
 /// the glass has there, and the band above starts fading in from that knot.
-/// Knots are close together by the hinge, where the blur grows fastest
-/// relative to itself (see `blurFloor`). Below the first knot the plain
-/// screen shows through, which is radius zero.
+/// Knots are evenly spaced in blur (see `blurFloor`), so they gather where
+/// the blur grows fastest relative to itself. Below the first knot the plain
+/// screen shows through, which is radius zero, unless the hinge itself is
+/// blurred: then the first band is that blur, opaque from the hinge up.
 ///
 /// Between two knots the fade is not an S-curve. Two blurs mixed by `w` keep
 /// detail as `(1 - w) · C₁ + w · C₂`, where `Cᵢ` is how much contrast each
@@ -20,12 +21,35 @@ import Foundation
 /// its knot, so the blur pauses there and then catches up.
 ///
 /// Measured row by row offscreen (gratings behind the real bands, rendered by
-/// `CARenderer`), in `log(radius + 2)`: with the top blur at 60 points over
-/// 400, these eight bands stay within 0.03 rms of the true blur (worst
+/// `CARenderer`), in `log(radius + 2)`: for a blur rising evenly to 60 points
+/// over 400, these eight bands stay within 0.03 rms of the true blur (worst
 /// 0.07) and grow evenly to 0.026 in second difference, where an S-curve
 /// fade on the same knots reaches 0.053, and eight quadratically spaced
 /// S-curve bands 0.064 with a worst error of 0.18 over a quarter more area.
 struct FrostBandLayout: Equatable {
+
+    /// A blur that rises up the glass, in points of radius:
+    /// `floor + rise · (position / height)^exponent`.
+    struct Profile: Equatable {
+        /// The blur at the hinge.
+        var floor: Double
+        /// How much more the top of the glass gets.
+        var rise: Double
+        var exponent: Double
+        /// The glass's height, in points.
+        var height: Double
+
+        func radius(at position: Double) -> Double {
+            floor + rise * pow(min(max(position / height, 0), 1), exponent)
+        }
+
+        /// The lowest point the blur reaches `radius`: the hinge for a
+        /// radius it already has there, the top for one it never reaches.
+        func position(ofRadius radius: Double) -> Double {
+            guard rise > 0, radius > floor else { return 0 }
+            return height * pow(min((radius - floor) / rise, 1), 1 / exponent)
+        }
+    }
 
     struct Stop: Equatable {
         /// Points up from the hinge.
@@ -62,22 +86,30 @@ struct FrostBandLayout: Equatable {
     var marginRadii = 2.5
     var stopsPerFade = 9
 
-    /// The bands for a blur of `radiusPerHeight` points per point up the
-    /// glass, on glass `height` points tall, with no band blurring more
-    /// than `maximumRadius`. Lowest band first.
-    func bands(radiusPerHeight: Double, height: Double, maximumRadius: Double) -> [Band] {
-        guard radiusPerHeight > 0, height > 0 else { return [] }
-        let topRadius = min(radiusPerHeight * height, maximumRadius)
+    /// The bands for `profile`, with no band blurring more than
+    /// `maximumRadius`. Lowest band first.
+    func bands(for profile: Profile, maximumRadius: Double) -> [Band] {
+        let height = profile.height
+        guard height > 0, profile.rise >= 0 else { return [] }
+        let topRadius = min(profile.radius(at: height), maximumRadius)
         guard topRadius >= minimumRadius else { return [] }
 
-        // Radii at the knots, evenly spaced from the smallest visible blur up
-        // to the top one, with bigger steps if the bands run out.
-        let low = log(minimumRadius + blurFloor)
+        // Radii at the knots, evenly spaced from the blur at the hinge, or
+        // the smallest visible one, up to the top one, with bigger steps if
+        // the bands run out. A blur the same all the way up is one band.
+        let lowRadius = min(max(profile.floor, minimumRadius), topRadius)
+        let low = log(lowRadius + blurFloor)
         let span = log(topRadius + blurFloor) - low
-        let steps = max(Int(ceil(span / log(ratio) - 1e-9)), 1)
+        let steps = span > 1e-9 ? max(Int(ceil(span / log(ratio) - 1e-9)), 1) : 0
         let count = min(steps, max(maximumBands - 1, 1))
-        let radii = (0...count).map { exp(low + span * Double($0) / Double(count)) - blurFloor }
-        let knots = radii.map { min($0 / radiusPerHeight, height) }
+        let radii = (0...count).map { index in
+            // Exact at both ends, so the bottom band starts at the hinge
+            // and the top one reaches the top.
+            if index == count { return topRadius }
+            if index == 0 { return lowRadius }
+            return exp(low + span * Double(index) / Double(count)) - blurFloor
+        }
+        let knots = count > 0 ? radii.map { profile.position(ofRadius: $0) } : [0]
 
         return radii.indices.map { index in
             let radius = radii[index]
@@ -94,7 +126,7 @@ struct FrostBandLayout: Equatable {
                     to: knot,
                     radiusBelow: index > 0 ? radii[index - 1] : 0,
                     radius: radius,
-                    radiusPerHeight: radiusPerHeight
+                    profile: profile
                 )
             )
         }
@@ -107,7 +139,7 @@ struct FrostBandLayout: Equatable {
         to: Double,
         radiusBelow: Double,
         radius: Double,
-        radiusPerHeight: Double
+        profile: Profile
     ) -> [Stop] {
         guard to > from else { return [Stop(position: to, opacity: 1)] }
         return (0..<stopsPerFade).map { stop in
@@ -127,7 +159,7 @@ struct FrostBandLayout: Equatable {
                 opacity = Self.matchedOpacity(
                     radiusBelow: radiusBelow,
                     radius: radius,
-                    target: position * radiusPerHeight
+                    target: profile.radius(at: position)
                 )
             }
             return Stop(position: position, opacity: opacity)

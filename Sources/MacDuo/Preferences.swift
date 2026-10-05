@@ -21,7 +21,6 @@ final class Preferences: ObservableObject {
         static let showsMenuBarIcon = "showsMenuBarIcon"
         static let isLivePicture = "isLivePicture"
         static let capturesScreen = "capturesScreen"
-        static let frost = "frost"
         static let isHapticsEnabled = "isHapticsEnabled"
         static let hapticStyle = "hapticStyle"
         static let hapticStrength = "hapticStrength"
@@ -31,7 +30,7 @@ final class Preferences: ObservableObject {
         static let all = [
             isEnabled, isTimeoutEnabled, thresholdAngle, blurSpan, maxBlurRadius,
             maxDim, viewingDistance, recession, blurEvenness, dimReach,
-            showsAngleInMenuBar, showsMenuBarIcon, isLivePicture, capturesScreen, frost,
+            showsAngleInMenuBar, showsMenuBarIcon, isLivePicture, capturesScreen,
             isHapticsEnabled, hapticStyle, hapticStrength, hapticTaps, isHapticsOnOpening,
         ]
     }
@@ -51,9 +50,6 @@ final class Preferences: ObservableObject {
         Key.showsMenuBarIcon: true,
         Key.isLivePicture: true,
         Key.capturesScreen: false,
-        // The blur upstream tuned by eye on a real lid, whose radius
-        // calibration ran 30% weaker than the measured one.
-        Key.frost: 0.7,
         Key.isHapticsEnabled: true,
         Key.hapticStyle: HapticPattern.Style.exponential.rawValue,
         Key.hapticStrength: 0.6,
@@ -140,12 +136,6 @@ final class Preferences: ObservableObject {
     /// and more power, and is the only way to lean the picture back.
     @Published var capturesScreen: Bool {
         didSet { defaults.set(capturesScreen, forKey: Key.capturesScreen) }
-    }
-
-    /// How diffuse the window server's glass is. One scatters like tracing
-    /// paper, zero is clear.
-    @Published var frost: Double {
-        didSet { defaults.set(frost, forKey: Key.frost) }
     }
 
     /// Tap the trackpad as the lid closes through the effect.
@@ -254,7 +244,6 @@ final class Preferences: ObservableObject {
         showsMenuBarIcon = defaults.bool(forKey: Key.showsMenuBarIcon)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
         capturesScreen = defaults.bool(forKey: Key.capturesScreen)
-        frost = defaults.double(forKey: Key.frost)
         isHapticsEnabled = defaults.bool(forKey: Key.isHapticsEnabled)
         hapticStyle = defaults.string(forKey: Key.hapticStyle) ?? HapticPattern.Style.exponential.rawValue
         hapticStrength = defaults.double(forKey: Key.hapticStrength)
@@ -280,7 +269,6 @@ final class Preferences: ObservableObject {
         showsMenuBarIcon = defaults.bool(forKey: Key.showsMenuBarIcon)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
         capturesScreen = defaults.bool(forKey: Key.capturesScreen)
-        frost = defaults.double(forKey: Key.frost)
         isHapticsEnabled = defaults.bool(forKey: Key.isHapticsEnabled)
         hapticStyle = defaults.string(forKey: Key.hapticStyle) ?? HapticPattern.Style.exponential.rawValue
         hapticStrength = defaults.double(forKey: Key.hapticStrength)

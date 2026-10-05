@@ -141,8 +141,6 @@ struct SettingsView: View {
                 localized("Full effect after"), value: $preferences.blurSpan, in: 5...60, format: "%.0f°",
                 help: localized("Degrees of further closing to reach full strength.")
             )
-            // The glass follows the lid's travel itself.
-            .disabled(!controller.capturesScreen)
         }
     }
 
@@ -158,35 +156,24 @@ struct SettingsView: View {
 
     private var lookGroup: some View {
         group(localized("Look")) {
-            // The glass is a frosted sheet: the blur is how frosted it is,
-            // and the dimming how much of the light it loses shows.
-            if controller.capturesScreen {
-                slider(
-                    localized("Blur"), value: $preferences.maxBlurRadius, in: 10...160, format: "%.0f pt",
-                    help: localized("Blur radius at the far edge.")
-                )
-            } else {
-                slider(
-                    localized("Blur"), value: $preferences.frost, in: 0.1...1.5, format: "%.0f%%", scale: 100,
-                    help: localized("How frosted the glass is. 100% is tracing paper.")
-                )
-            }
+            // The glass blurs and dims by the same rules as the captured
+            // picture; only the lean is left out.
+            slider(
+                localized("Blur"), value: $preferences.maxBlurRadius, in: 10...160, format: "%.0f pt",
+                help: localized("Blur radius at the far edge.")
+            )
             slider(
                 localized("Blur spread"), value: $preferences.blurEvenness, in: 0...1, format: "%.0f%%", scale: 100,
                 help: localized("0 blurs the far edge only, 100 the whole picture.")
             )
-            .disabled(!controller.capturesScreen)
             slider(
                 localized("Dimming"), value: $preferences.maxDim, in: 0...1, format: "%.0f%%", scale: 100,
-                help: controller.capturesScreen
-                    ? localized("How dark the far edge goes.")
-                    : localized("How much of the light the lifted glass loses shows as dark.")
+                help: localized("How dark the far edge goes.")
             )
             slider(
                 localized("Dimming spread"), value: $preferences.dimReach, in: 0.2...1, format: "%.0f%%", scale: 100,
                 help: localized("Everything above this height goes fully dark.")
             )
-            .disabled(!controller.capturesScreen)
         }
     }
 
