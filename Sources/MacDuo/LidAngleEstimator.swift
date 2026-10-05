@@ -174,6 +174,8 @@ struct LidAngleEstimator {
     /// of now, so a reading can land after a frame that already showed a
     /// moment later than the reading.
     private var lastShownTime: TimeInterval = -.greatestFiniteMagnitude
+    /// Readings in a row the filter's newest angle has stayed far from.
+    private var strays = 0
 
     /// A lid of unknown motion could be moving this fast, degrees per second,
     /// and changing speed this fast, degrees per second squared.
@@ -270,6 +272,37 @@ struct LidAngleEstimator {
             return
         }
         update(value, arrived: arrived, timingVariance: timingVariance, at: time)
+
+        // A filter takes each reading in, so its newest angle is never far
+        // from it for long; one that stays far has stopped taking them in.
+        // It starts again from the reading, and says what it was holding.
+        guard abs(state.x - value) > Self.strayLimit || !state.x.isFinite else {
+            strays = 0
+            return
+        }
+        strays += 1
+        guard strays >= Self.straysBeforeRestart else { return }
+        let held = summary(reading: value, arrived: arrived, at: time)
+        Diagnostics.lid.error("estimator restarted: \(held, privacy: .public)")
+        let speed = secantSpeed ?? 0
+        hasReading = false
+        seed = (speed.isFinite ? speed : 0, Self.unknownSpeed * Self.unknownSpeed)
+        strays = 0
+        begin(value, arrived: arrived, timingVariance: timingVariance, at: time)
+    }
+
+    /// Further than a lid moves between two readings, and further than any
+    /// correction leaves the filter behind.
+    private static let strayLimit = 20.0
+    private static let straysBeforeRestart = 3
+
+    /// What the filter holds, for the log.
+    private func summary(reading: Double, arrived: TimeInterval, at time: TimeInterval) -> String {
+        func f(_ x: Double) -> String { String(format: "%.4g", x) }
+        return "reading \(f(reading)) at \(f(time)) arrived \(f(arrived)); state \(f(state.x)) \(f(state.y)) \(f(state.z)) "
+            + "at \(f(stateTime)); covariance aa \(f(covariance.aa)) av \(f(covariance.av)) vv \(f(covariance.vv)) "
+            + "cc \(f(covariance.cc)); spread \(f(timingSpread)) secant \(secantSpeed.map(f) ?? "-") "
+            + "carried \(f(carriedSpeed)) held \(held.map(f) ?? "-") shown \(f(lastShownTime))"
     }
 
     private mutating func begin(_ reading: Double, arrived: TimeInterval, timingVariance: Double, at time: TimeInterval) {
