@@ -14,16 +14,16 @@
     "allow_concurrent_runs": true
   },
   {
-    "label": "swift: Build Debug MacDuo",
+    "label": "swift: Build Debug DuoFold",
     "command": "swift",
-    "args": ["build", "--configuration", "debug", "--product", "MacDuo"],
+    "args": ["build", "--configuration", "debug", "--product", "DuoFold"],
     "use_new_terminal": false,
     "allow_concurrent_runs": true
   },
   {
-    "label": "swift: Build Release MacDuo",
+    "label": "swift: Build Release DuoFold",
     "command": "swift",
-    "args": ["build", "--configuration", "release", "--product", "MacDuo"],
+    "args": ["build", "--configuration", "release", "--product", "DuoFold"],
     "use_new_terminal": false,
     "allow_concurrent_runs": true
   }

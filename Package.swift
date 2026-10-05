@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "MacDuo",
+    name: "DuoFold",
     defaultLocalization: "en",
     platforms: [.macOS(.v14)],
     targets: [
@@ -12,9 +12,9 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(
-            name: "MacDuo",
+            name: "DuoFold",
             dependencies: ["LidAngleKit"],
-            path: "Sources/MacDuo",
+            path: "Sources/DuoFold",
             resources: [.process("Resources")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
@@ -25,9 +25,9 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
-            name: "MacDuoTests",
-            dependencies: ["MacDuo", "LidAngleKit"],
-            path: "Tests/MacDuoTests",
+            name: "DuoFoldTests",
+            dependencies: ["DuoFold", "LidAngleKit"],
+            path: "Tests/DuoFoldTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]

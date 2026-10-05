@@ -16,19 +16,19 @@
     "build": "swift: Build Release lidprobe"
   },
   {
-    "label": "Debug MacDuo",
+    "label": "Debug DuoFold",
     "adapter": "Swift",
     "request": "launch",
-    "program": "$ZED_WORKTREE_ROOT/.build/debug/MacDuo",
+    "program": "$ZED_WORKTREE_ROOT/.build/debug/DuoFold",
     "cwd": "$ZED_WORKTREE_ROOT",
-    "build": "swift: Build Debug MacDuo"
+    "build": "swift: Build Debug DuoFold"
   },
   {
-    "label": "Release MacDuo",
+    "label": "Release DuoFold",
     "adapter": "Swift",
     "request": "launch",
-    "program": "$ZED_WORKTREE_ROOT/.build/release/MacDuo",
+    "program": "$ZED_WORKTREE_ROOT/.build/release/DuoFold",
     "cwd": "$ZED_WORKTREE_ROOT",
-    "build": "swift: Build Release MacDuo"
+    "build": "swift: Build Release DuoFold"
   }
 ]

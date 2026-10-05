@@ -9,7 +9,7 @@ import LidAngleKit
 ///     lidprobe watch 15   look for the angle rising while the lid closes
 ///     lidprobe push 100   pushed readings asked for every 100 ms, for 5 s
 ///     lidprobe reset      put the sensor back to pushing once a second, for
-///                         when Mac Duo was killed before it could
+///                         when Duo Fold was killed before it could
 
 let sensor = LidAngleSensor()
 
@@ -117,7 +117,7 @@ case "push":
         lock.unlock()
     }
     guard started else {
-        print("this sensor cannot be told how often to push; Mac Duo polls it instead")
+        print("this sensor cannot be told how often to push; Duo Fold polls it instead")
         exit(1)
     }
     print("asked for a reading every \(Int(milliseconds)) ms, listening for 5 s")

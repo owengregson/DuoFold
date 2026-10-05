@@ -1,6 +1,6 @@
 #!/usr/bin/env swift
 //
-// Renders the Mac Duo app icon and packs it into Resources/AppIcon.icns.
+// Renders the Duo Fold app icon and packs it into Resources/AppIcon.icns.
 //
 //   swift scripts/make-app-icon.swift [output directory]
 //

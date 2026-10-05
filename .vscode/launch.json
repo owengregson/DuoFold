@@ -25,20 +25,20 @@
 			"request": "launch",
 			"args": [],
 			"cwd": "${workspaceFolder:Mac-Duo}",
-			"name": "Debug MacDuo",
-			"target": "MacDuo",
+			"name": "Debug DuoFold",
+			"target": "DuoFold",
 			"configuration": "debug",
-			"preLaunchTask": "swift: Build Debug MacDuo"
+			"preLaunchTask": "swift: Build Debug DuoFold"
 		},
 		{
 			"type": "swift",
 			"request": "launch",
 			"args": [],
 			"cwd": "${workspaceFolder:Mac-Duo}",
-			"name": "Release MacDuo",
-			"target": "MacDuo",
+			"name": "Release DuoFold",
+			"target": "DuoFold",
 			"configuration": "release",
-			"preLaunchTask": "swift: Build Release MacDuo"
+			"preLaunchTask": "swift: Build Release DuoFold"
 		}
 	]
 }
