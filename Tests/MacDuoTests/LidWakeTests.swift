@@ -70,6 +70,9 @@ struct LidWakeTests {
         #expect(!needs(isActive: false, capturesScreen: true))
         #expect(needs(isActive: true, isTimeoutEnabled: true))
         #expect(needs(isActive: true, isPictureSettled: false))
+        // Counting a shut lid to the end of its run.
+        #expect(needs(isActive: true, isShut: true))
+        #expect(!needs(isActive: false, isShut: true))
     }
 
     @Test
@@ -105,6 +108,7 @@ struct LidWakeTests {
         isActive: Bool = false,
         capturesScreen: Bool = false,
         isTimeoutEnabled: Bool = false,
+        isShut: Bool = false,
         isPictureSettled: Bool = true,
         sinceMovement: Double = 10
     ) -> Bool {
@@ -117,6 +121,7 @@ struct LidWakeTests {
             isActive: isActive,
             capturesScreen: capturesScreen,
             isTimeoutEnabled: isTimeoutEnabled,
+            isShut: isShut,
             isPictureSettled: isPictureSettled,
             sinceMovement: sinceMovement
         )

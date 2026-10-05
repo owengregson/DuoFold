@@ -39,35 +39,42 @@ struct LidShutTests {
         #expect(LidAngleSensor.hingeAngle(fromReported: -1) == nil)
     }
 
-    @Test
-    func testAFullCloseAndAFastOpenAreOneRun() throws {
-        // What `LidController` decides on each poll, with every reading
-        // found once.
+    /// What `LidController` decides on each poll, with every reading found
+    /// once: when a run starts and ends, and at what angle.
+    private static func decisions(
+        for readings: [(time: Double, angle: Double)]
+    ) -> [(time: Double, angle: Double, active: Bool)] {
         var motion = LidMotion()
         var dwell = LidOpenDwell()
+        var shut = LidShutHold()
+        var latch = LidReopenLatch()
         var isActive = false
         var peak = 0.0, lowest = 0.0, startedAt = 0.0
-        var changes: [(angle: Double, active: Bool)] = []
-        for (now, angle) in try Self.readings() {
+        var changes: [(time: Double, angle: Double, active: Bool)] = []
+        for (now, angle) in readings {
             peak = max(peak, angle)
             if isActive { lowest = min(lowest, angle) }
             motion.update(with: angle, at: now, prewarmSpeed: 8)
-            dwell.update(angle: angle, at: now, dwellAngle: Self.policy.dwellAngle)
-            let wanted = Self.policy.wantsEffect(
+            dwell.update(angle: angle, at: now, dwellAngle: policy.dwellAngle)
+            shut.update(angle: angle, at: now)
+            if !isActive, !latch.allowsStart(angle: angle, threshold: policy.threshold) { continue }
+            let wanted = policy.wantsEffect(
                 isEnabled: true,
                 isActive: isActive,
                 angle: angle,
                 predictedAngle: motion.predictedAngle(from: angle, at: now),
                 riseSinceLowest: angle - lowest,
-                hasBeenAboveThreshold: peak >= Self.policy.threshold,
+                hasBeenAboveThreshold: peak >= policy.threshold,
                 wasClosingRecently: motion.intent.wasClosingRecently(at: now, memoryDuration: 1.5),
                 isClearlyOpening: motion.isClearlyOpening,
                 hasDwelledOpen: dwell.hasDwelled(at: now, duration: 1),
-                minimumDurationElapsed: now - startedAt > 0.35
+                minimumDurationElapsed: now - startedAt > 0.35,
+                hasHeldShut: shut.hasHeld(at: now)
             )
+            if isActive, !wanted, shut.hasHeld(at: now) { latch.engage() }
             guard wanted != isActive else { continue }
             isActive = wanted
-            changes.append((angle, wanted))
+            changes.append((now, angle, wanted))
             if wanted {
                 peak = angle
                 lowest = angle
@@ -75,11 +82,58 @@ struct LidShutTests {
                 startedAt = now
             }
         }
+        return changes
+    }
+
+    @Test
+    func testAFullCloseAndAFastOpenAreOneRun() throws {
+        let changes = Self.decisions(for: try Self.readings())
         // Started on the way down, held through the shut, and let go only
         // once the lid opened back past the start angle: no end as it shut,
         // and no second start part way up.
         #expect(changes.map(\.active) == [true, false], "\(changes)")
         #expect(changes.last?.angle == 85)
+    }
+
+    @Test
+    func testALidHeldShutEndsTheRunAndOpeningLeavesTheScreenAlone() throws {
+        // Closed past the start angle and pressed shut, resting there with
+        // its reading creeping either side of zero, then opened slowly and
+        // closed again before reaching the start angle.
+        var reported: [Double] = [110, 100, 88, 70, 40, 10, 1.5]
+        reported += (0..<30).map { [359.1, 359.0, 0.44, 0.12, 359.95][$0 % 5] }
+        reported += [3, 10, 20, 35, 50, 65, 75, 70, 60]
+        let readings = try reported.enumerated().map { index, value in
+            (time: Double(index) * Self.refresh, angle: try #require(LidAngleSensor.hingeAngle(fromReported: value)))
+        }
+        let shutAt = readings[7].time
+        let changes = Self.decisions(for: readings)
+        // One run, ended by the lid held shut, two seconds after it shut.
+        #expect(changes.map(\.active) == [true, false], "\(changes)")
+        let end = try #require(changes.last)
+        #expect(end.angle <= LidShutHold.shutAngle)
+        #expect(end.time - shutAt >= LidShutHold.duration)
+        #expect(end.time - shutAt < LidShutHold.duration + 1.5 * Self.refresh)
+    }
+
+    @Test
+    func testAShutLidCountsFromWhenItShut() {
+        var hold = LidShutHold()
+        hold.update(angle: 30, at: 0)
+        #expect(!hold.isShut)
+        // Pressed shut, and resting there either side of zero.
+        for (index, angle) in [-0.91, 0.44, -0.05, 0.12].enumerated() {
+            hold.update(angle: angle, at: 1 + Double(index))
+        }
+        #expect(hold.isShut)
+        #expect(hold.hasHeld(at: 1 + LidShutHold.duration))
+        #expect(!hold.hasHeld(at: 1 + LidShutHold.duration - 0.01))
+        // Opened past a degree, the count starts over.
+        hold.update(angle: 1.5, at: 5)
+        #expect(!hold.isShut && !hold.hasHeld(at: 10))
+        hold.update(angle: 0.5, at: 6)
+        #expect(!hold.hasHeld(at: 7.9))
+        #expect(hold.hasHeld(at: 8))
     }
 
     @Test

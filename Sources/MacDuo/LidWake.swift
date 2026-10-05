@@ -65,6 +65,7 @@ struct LidWakePolicy {
         isActive: Bool,
         capturesScreen: Bool,
         isTimeoutEnabled: Bool,
+        isShut: Bool,
         isPictureSettled: Bool,
         sinceMovement: TimeInterval
     ) -> Bool {
@@ -74,9 +75,10 @@ struct LidWakePolicy {
         if isPrewarming { return true }
         if sinceMovement < Self.settleDuration { return true }
         guard isActive else { return false }
-        // A capture keeps delivering frames, the timeout counts time, and a
-        // picture still easing toward the lid has frames left to draw.
-        return capturesScreen || isTimeoutEnabled || !isPictureSettled
+        // A capture keeps delivering frames, the timeout and a shut lid count
+        // time, and a picture still easing toward the lid has frames left to
+        // draw.
+        return capturesScreen || isTimeoutEnabled || isShut || !isPictureSettled
     }
 
     func pushInterval(isEnabled: Bool) -> TimeInterval {
