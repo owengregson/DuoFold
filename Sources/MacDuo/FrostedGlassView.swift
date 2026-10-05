@@ -20,6 +20,29 @@ import QuartzCore
 /// - past the margin, black.
 ///
 /// Built only when `WindowServerBlur.isAvailable`.
+/// How the leaning glass is drawn, chosen at launch by the `glassRenderer`
+/// default, so the ways can be told apart on screen. The window server
+/// never maps what it redraws through a mesh (`refresh`), and each way
+/// answers that differently.
+enum GlassRenderer: String {
+    /// Every layer meshed, and the whole glass redrawn on every frame.
+    case mesh
+    /// Every layer meshed, all in one flat container the window server
+    /// rasterizes. Core Animation redraws a rasterized layer whole whenever
+    /// a backdrop in it is redrawn, in the same frame.
+    case raster
+    /// The glass flat in its window, and the window warped by the window
+    /// server (`WindowWarp`), whose redrawing follows a window's warp.
+    case warp
+
+    static let current: GlassRenderer = {
+        let chosen = UserDefaults.standard.string(forKey: "glassRenderer").flatMap(GlassRenderer.init(rawValue:)) ?? .mesh
+        let renderer = chosen == .warp && !WindowWarp.isAvailable ? .mesh : chosen
+        Diagnostics.geometry.notice("glass renderer: \(renderer.rawValue, privacy: .public)")
+        return renderer
+    }()
+}
+
 @MainActor
 final class FrostedGlassView: NSView {
 
@@ -40,6 +63,9 @@ final class FrostedGlassView: NSView {
     nonisolated private static let meshRows = 64
 
     private let bandLayout = FrostBandLayout()
+    /// What every layer of the glass sits in: the view's own layer, or the
+    /// rasterized container (`GlassRenderer.raster`).
+    private let stage: CALayer
     private let samplesOtherWindows: Bool
     /// A sharp copy of the screen under the bands, so the leaning picture
     /// shows the screen where no band blurs it.
@@ -59,15 +85,31 @@ final class FrostedGlassView: NSView {
         var gradient: BlurGradient
         var size: CGSize
         var lean: GlassLean
+        var backsWithScreen: Bool
     }
 
     /// - Parameter samplesOtherWindows: false blurs only layers behind the
     ///   bands in this view's own tree, for offscreen checks.
     init(frame: NSRect, scale: CGFloat, samplesOtherWindows: Bool = true) {
         self.samplesOtherWindows = samplesOtherWindows
-        super.init(frame: frame)
         let root = CALayer()
         root.contentsScale = scale
+        if GlassRenderer.current == .raster {
+            let container = CALayer()
+            container.anchorPoint = .zero
+            container.contentsScale = scale
+            container.shouldRasterize = true
+            container.rasterizationScale = scale
+            // Keep the backdrops in it live, not baked into the bitmap.
+            if container.responds(to: NSSelectorFromString("setRasterizationPrefersWindowServerAwareBackdrops:")) {
+                container.setValue(true, forKey: "rasterizationPrefersWindowServerAwareBackdrops")
+            }
+            root.addSublayer(container)
+            stage = container
+        } else {
+            stage = root
+        }
+        super.init(frame: frame)
         layer = root
         wantsLayer = true
         layerContentsRedrawPolicy = .never
@@ -79,7 +121,7 @@ final class FrostedGlassView: NSView {
             base.anchorPoint = .zero
             base.contentsScale = scale
             base.isHidden = true
-            root.addSublayer(base)
+            stage.addSublayer(base)
             self.base = base
         }
 
@@ -87,7 +129,7 @@ final class FrostedGlassView: NSView {
         shade.startPoint = CGPoint(x: 0.5, y: 0)
         shade.endPoint = CGPoint(x: 0.5, y: 1)
         shade.isHidden = true
-        root.addSublayer(shade)
+        stage.addSublayer(shade)
 
         let profile = Self.edgeProfile()
         for edge in edges {
@@ -97,14 +139,14 @@ final class FrostedGlassView: NSView {
             edge.locations = profile.map { NSNumber(value: $0.position) }
             edge.colors = profile.map { CGColor(gray: 0, alpha: $0.opacity) }
             edge.isHidden = true
-            root.addSublayer(edge)
+            stage.addSublayer(edge)
         }
 
         surround.anchorPoint = .zero
         surround.fillColor = CGColor(gray: 0, alpha: 1)
         surround.fillRule = .evenOdd
         surround.isHidden = true
-        root.addSublayer(surround)
+        stage.addSublayer(surround)
     }
 
     @available(*, unavailable)
@@ -117,9 +159,11 @@ final class FrostedGlassView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer?.frame = bounds
+        if stage !== layer { stage.frame = bounds }
         CATransaction.commit()
         if let lastState {
-            apply(progress: lastState.progress, tuning: lastState.tuning, gradient: lastState.gradient, lean: lastState.lean)
+            apply(progress: lastState.progress, tuning: lastState.tuning, gradient: lastState.gradient,
+                  lean: lastState.lean, backsWithScreen: lastState.backsWithScreen)
         }
     }
 
@@ -129,14 +173,18 @@ final class FrostedGlassView: NSView {
     ///     it.
     ///   - lean: where the picture lies on screen; flat when `nil`, or when
     ///     this system cannot mesh a layer.
-    func apply(progress: Double, tuning: DepthTuning, gradient: BlurGradient, lean: GlassLean? = nil) {
+    ///   - backsWithScreen: lay a sharp copy of the screen under the bands
+    ///     while the glass lies flat, for a window the window server itself
+    ///     warps (`WindowWarp`): where no band blurs, the leaning window must
+    ///     still show the screen rather than let the flat screen through.
+    func apply(progress: Double, tuning: DepthTuning, gradient: BlurGradient, lean: GlassLean? = nil, backsWithScreen: Bool = false) {
         let size = bounds.size
         guard size.width > 0, size.height > 0 else { return }
         let scale = layer?.contentsScale ?? 2
         let flat = GlassLean.flat(screenSize: size, pixelScale: scale)
         var lean = GlassMesh.isAvailable ? (lean ?? flat) : flat
         lean.screenSize = size
-        let state = State(progress: min(max(progress, 0), 1), tuning: tuning, gradient: gradient, size: size, lean: lean)
+        let state = State(progress: min(max(progress, 0), 1), tuning: tuning, gradient: gradient, size: size, lean: lean, backsWithScreen: backsWithScreen)
         guard state != lastState else { return }
         lastState = state
 
@@ -149,10 +197,13 @@ final class FrostedGlassView: NSView {
         let rows = { (bottom: Double, top: Double) in max(Int((Double(Self.meshRows) * (top - bottom) / height).rounded(.up)), 2) }
 
         if let base {
-            base.isHidden = !leans
-            if leans {
+            base.isHidden = !(leans || backsWithScreen)
+            if !base.isHidden {
                 base.frame = CGRect(origin: .zero, size: size)
-                GlassMesh.apply(lean.meshParts(for: lean.pictureGrid(bottom: 0, top: height, rows: Self.meshRows), layerFrame: base.frame), to: base)
+                GlassMesh.apply(
+                    leans ? lean.meshParts(for: lean.pictureGrid(bottom: 0, top: height, rows: Self.meshRows), layerFrame: base.frame) : ([], []),
+                    to: base
+                )
             }
         }
 
@@ -164,7 +215,7 @@ final class FrostedGlassView: NSView {
             maximumRadius: height / 2
         )
         while bands.count < planned.count, let band = makeBand() {
-            layer?.insertSublayer(band, below: shade)
+            stage.insertSublayer(band, below: shade)
             bands.append(band)
         }
         for (index, band) in bands.enumerated() {
@@ -198,8 +249,12 @@ final class FrostedGlassView: NSView {
             gradient.sigma(progress: state.progress, height: picture / height,
                            maxBlurRadius: tuning.maxBlurRadius, evenness: min(max(tuning.blurEvenness, 0), 1))
         }
-        for (edge, grid) in zip(edges, Self.edgeGrids(lean: lean, sigma: sigma)) {
-            edge.isHidden = grid == nil || !GlassMesh.isAvailable
+        // Lying flat, the margin is off screen, so an edge whose blur is too
+        // small to darken anything has nothing to draw. Leaning, it still
+        // keeps its margin black.
+        let darkens = [height, height, height, 0].map { Self.edgeReach * sigma($0) >= 0.1 }
+        for ((edge, grid), darkens) in zip(zip(edges, Self.edgeGrids(lean: lean, sigma: sigma)), darkens) {
+            edge.isHidden = grid == nil || !GlassMesh.isAvailable || (!leans && !darkens)
             guard let grid, !edge.isHidden else { continue }
             edge.frame = bounds
             GlassMesh.apply(lean.meshParts(for: grid, layerFrame: bounds), to: edge)
@@ -220,9 +275,10 @@ final class FrostedGlassView: NSView {
         }
     }
 
-    /// True while the glass leans, when the window server has to draw all
-    /// of it on every frame (`refresh`).
-    var needsEveryFrame: Bool { base.map { !$0.isHidden } ?? false }
+    /// True while the glass's own layers lean, when the window server has to
+    /// draw all of it on every frame (`refresh`). A flat glass in a warped
+    /// window has no such need.
+    var needsEveryFrame: Bool { GlassRenderer.current == .mesh && (lastState.map { !$0.lean.isFlat } ?? false) }
 
     /// Has the window server draw the whole glass again on its next frame.
     ///
@@ -235,7 +291,7 @@ final class FrostedGlassView: NSView {
     /// whole glass has all of it drawn and captured afresh instead, as while
     /// the lid moves and every mesh changes.
     func refresh() {
-        guard let base, !base.isHidden else { return }
+        guard let base, needsEveryFrame else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         base.opacity = base.opacity < 1 ? 1 : 0.99999
@@ -311,26 +367,29 @@ final class FrostedGlassView: NSView {
     /// Where each edge's darkening lies, as meshes of `edgeProfile` laid
     /// across the left, right, top and hinge edges, each `edgeReach` sigmas
     /// either side of the edge and stretched on out to the end of the
-    /// margin. `nil` for an edge whose blur is too small to darken anything.
+    /// margin.
+    ///
+    /// An edge whose blur is too small to darken anything still has its
+    /// margin: the picture's edge stretched into it, which the captured
+    /// picture has black. So the profile never narrows past a quarter of a
+    /// point, a step from the picture to the black margin.
     nonisolated static func edgeGrids(lean: GlassLean, sigma: (Double) -> Double) -> [GlassLean.Grid?] {
         let width = Double(lean.screenSize.width), height = Double(lean.screenSize.height)
         let padded = lean.padded
         let overlap = 2.0
-        let reach = edgeReach
+        let half = { (s: Double) in max(edgeReach * s, 0.25) }
         typealias Vertex = GlassLean.Vertex
-        let visible = { (s: Double) in reach * s >= 0.1 }
 
         // Left and right: a row every so often up the height, the profile
         // running across the edge, its width following the blur there.
         let heights = (0...meshRows).map { Double(padded.maxY + overlap) * Double($0) / Double(meshRows) }
         func side(_ edge: Double, outward: Double) -> GlassLean.Grid? {
-            guard heights.contains(where: { visible(sigma(min($0, height))) }) else { return nil }
             let far = outward < 0 ? Double(padded.minX) - overlap : Double(padded.maxX) + overlap
             return GlassLean.Grid(rows: heights.map { y in
-                let s = sigma(min(y, height)), v = y / heights.last!
-                let outer = edge + outward * reach * s
+                let h = half(sigma(min(y, height))), v = y / heights.last!
+                let outer = edge + outward * h
                 return [
-                    Vertex(from: CGPoint(x: 0, y: v), picture: CGPoint(x: edge - outward * reach * s, y: y)),
+                    Vertex(from: CGPoint(x: 0, y: v), picture: CGPoint(x: edge - outward * h, y: y)),
                     Vertex(from: CGPoint(x: 1, y: v), picture: CGPoint(x: outer, y: y)),
                     Vertex(from: CGPoint(x: 1, y: v), picture: CGPoint(x: outward < 0 ? min(outer, far) : max(outer, far), y: y)),
                 ]
@@ -340,18 +399,18 @@ final class FrostedGlassView: NSView {
         // Top and hinge: one blur along each, the profile running up across
         // the edge, rows across it so the lean is followed.
         func across(_ edge: Double, outward: Double, s: Double) -> GlassLean.Grid? {
-            guard visible(s) else { return nil }
+            let h = half(s)
             let far = outward > 0 ? Double(padded.maxY) + overlap : Double(padded.minY) - overlap
             let steps = 16
             var rows: [[Vertex]] = (0...steps).map { step in
                 let u = Double(step) / Double(steps)
-                let y = edge + outward * reach * s * (2 * u - 1)
+                let y = edge + outward * h * (2 * u - 1)
                 return [
                     Vertex(from: CGPoint(x: u, y: 0), picture: CGPoint(x: Double(padded.minX) - overlap, y: y)),
                     Vertex(from: CGPoint(x: u, y: 1), picture: CGPoint(x: Double(padded.maxX) + overlap, y: y)),
                 ]
             }
-            let outer = edge + outward * reach * s
+            let outer = edge + outward * h
             let last = outward > 0 ? max(outer, far) : min(outer, far)
             rows.append([
                 Vertex(from: CGPoint(x: 1, y: 0), picture: CGPoint(x: Double(padded.minX) - overlap, y: last)),

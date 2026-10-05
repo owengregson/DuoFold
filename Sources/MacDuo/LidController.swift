@@ -1088,8 +1088,13 @@ final class LidController: ObservableObject {
     /// leans the same.
     private func applyVisual(angle: Double) {
         let progress = blurProgress(for: angle)
+        // One commit to the window server per frame: the glass's new layout
+        // and its refresh reach it together, never a frame apart.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         overlay.update(progress: progress, currentAngle: ramp.pictureAngle(for: angle), tuning: tuning)
         overlay.refreshGlass()
+        CATransaction.commit()
     }
 
     private var tuning: DepthTuning {

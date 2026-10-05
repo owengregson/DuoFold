@@ -107,8 +107,14 @@ struct GlassLeanTests {
         }
         let top = try #require(grids[2])
         #expect(top.rows.last!.allSatisfy { $0.picture.y > lean.padded.maxY })
-        // No blur, no darkening.
-        #expect(FrostedGlassView.edgeGrids(lean: lean) { _ in 0 }.allSatisfy { $0 == nil })
+        // No blur: a step at the edge, and the margin beyond it still black.
+        let sharp = FrostedGlassView.edgeGrids(lean: lean) { _ in 0 }
+        #expect(sharp.allSatisfy { $0 != nil })
+        for row in try #require(sharp[0]).rows {
+            #expect(row[0].picture.x > 0 && row[0].picture.x <= 0.25 && row[1].picture.x < 0 && row[1].picture.x >= -0.25)
+            #expect(row[2].picture.x < lean.padded.minX)
+        }
+        #expect(try #require(sharp[2]).rows.last!.allSatisfy { $0.picture.y > lean.padded.maxY })
     }
 
     @Test
