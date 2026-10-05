@@ -210,11 +210,18 @@ struct LidEffectPolicy {
 struct LidEffectRamp {
     let startAngle: Double
     let span: Double
+    /// Lid travel past the start angle at which the picture's lean tops out.
+    let leanTravel: Double
 
-    init(startAngle: Double, span: Double) {
+    /// - Parameters:
+    ///   - maxLean: the most the picture leans back, in degrees.
+    ///   - recession: degrees of lean per degree of closing.
+    init(startAngle: Double, span: Double, maxLean: Double = .infinity, recession: Double = 1) {
         self.startAngle = startAngle
         // No span at all would leave nothing to ramp over.
         self.span = max(span, 1)
+        // A picture that does not lean has no lean to cap.
+        leanTravel = recession > 0 ? max(maxLean, 1) / recession : .infinity
     }
 
     var fullEffectAngle: Double { startAngle - span }
@@ -224,10 +231,31 @@ struct LidEffectRamp {
         min(max((startAngle - angle) / span, 0), 1)
     }
 
-    /// The angle the picture is drawn at. Past full strength it holds there,
-    /// so the picture stops leaning back when the blur and dimming stop
-    /// growing, rather than stretching on until the lid shuts.
+    /// The angle the picture is drawn at. It holds once the lean reaches its
+    /// most, and at full strength, so the picture stops leaning back when the
+    /// blur and dimming stop growing, rather than stretching on until the lid
+    /// shuts.
+    ///
+    /// Perspective squeezes the far edge faster the further the picture
+    /// leans, so equal steps of closing look like ever bigger ones. The lean
+    /// eases into its cap rather than stopping dead.
     func pictureAngle(for angle: Double) -> Double {
-        max(angle, fullEffectAngle)
+        let travel = startAngle - angle
+        guard travel > 0 else { return angle }
+        let held = min(Self.softLimit(travel, limit: leanTravel, knee: leanTravel / 4), span)
+        // Untouched until something holds it, to the last bit.
+        return held == travel ? angle : startAngle - held
+    }
+
+    /// `value` up to `limit - knee`, then easing into `limit`, which it
+    /// reaches at `limit + knee` and keeps. The slope runs smoothly from 1
+    /// down to 0, so whatever follows it slows to a stop.
+    static func softLimit(_ value: Double, limit: Double, knee: Double) -> Double {
+        guard limit.isFinite else { return value }
+        guard knee > 0 else { return min(value, limit) }
+        if value <= limit - knee { return value }
+        if value >= limit + knee { return limit }
+        let over = value - (limit - knee)
+        return value - over * over / (4 * knee)
     }
 }

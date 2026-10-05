@@ -98,4 +98,75 @@ struct LidEffectRampTests {
         #expect(corners(lid: 31) != held)
         #expect(corners(lid: 60) != corners(lid: 50))
     }
+
+    @Test
+    func testSoftLimitEasesIntoTheCap() {
+        func limited(_ value: Double) -> Double { LidEffectRamp.softLimit(value, limit: 40, knee: 10) }
+        // Untouched below the knee, held at the cap past it.
+        #expect(limited(10) == 10)
+        #expect(limited(30) == 30)
+        #expect(limited(50) == 40)
+        #expect(limited(90) == 40)
+        // Never above the cap, never going backwards, and no kink: the step
+        // shrinks smoothly from one degree to none.
+        var previous = limited(29)
+        var previousStep = 1.0
+        for tenth in 291...510 {
+            let value = limited(Double(tenth) / 10)
+            let step = (value - previous) * 10
+            #expect(value <= 40)
+            #expect(step >= 0)
+            #expect(step <= previousStep + 1e-9)
+            #expect(previousStep - step < 0.06)
+            previous = value
+            previousStep = step
+        }
+        #expect(LidEffectRamp.softLimit(70, limit: .infinity, knee: .infinity) == 70)
+    }
+
+    @Test
+    func testLeanTopsOutBeforeFullEffect() {
+        // 45° of lean at one degree per degree tops out 56.25° on, ahead of
+        // full effect at 60°.
+        let capped = LidEffectRamp(startAngle: 90, span: 60, maxLean: 45, recession: 1)
+        #expect(capped.pictureAngle(for: 80) == 80)
+        #expect(capped.pictureAngle(for: 50) > 45)
+        #expect(capped.pictureAngle(for: 33.75) == 45)
+        #expect(capped.pictureAngle(for: 10) == 45)
+        // Leaning twice as fast reaches the same lean in half the travel.
+        let steep = LidEffectRamp(startAngle: 90, span: 60, maxLean: 45, recession: 2)
+        #expect(steep.pictureAngle(for: 0) == 90 - 22.5)
+    }
+
+    @Test
+    func testFullEffectStillHoldsWhenTheLeanCapIsFurther() {
+        let wide = LidEffectRamp(startAngle: 90, span: 30, maxLean: 80, recession: 1)
+        #expect(wide.pictureAngle(for: 40) == wide.fullEffectAngle)
+    }
+
+    @Test
+    func testNoLeanMeansNoCap() {
+        let flat = LidEffectRamp(startAngle: 90, span: 60, maxLean: 10, recession: 0)
+        #expect(flat.pictureAngle(for: 50) == 50)
+        #expect(flat.pictureAngle(for: 10) == 30)
+    }
+
+    /// The far edge stops moving once the lean tops out, where before it
+    /// moved faster with every degree.
+    @Test
+    func testCornersStopMovingOnceTheLeanTopsOut() {
+        let capped = LidEffectRamp(startAngle: 90, span: 100, maxLean: 45, recession: 1)
+        func top(lid angle: Double) -> CGFloat {
+            DepthGeometry().corners(
+                startAngle: 90,
+                currentAngle: capped.pictureAngle(for: angle),
+                viewingDistanceRatio: 6,
+                recession: 1,
+                screenSize: CGSize(width: 1512, height: 982)
+            )[2].y
+        }
+        #expect(top(lid: 30) == top(lid: 0))
+        #expect(top(lid: 30) == top(lid: -10))
+        #expect(top(lid: 60) != top(lid: 50))
+    }
 }

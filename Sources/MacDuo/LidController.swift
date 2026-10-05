@@ -849,7 +849,12 @@ final class LidController: ObservableObject {
     }
 
     private var ramp: LidEffectRamp {
-        LidEffectRamp(startAngle: effectiveThreshold, span: preferences.blurSpan)
+        LidEffectRamp(
+            startAngle: effectiveThreshold,
+            span: preferences.blurSpan,
+            maxLean: preferences.maxLean,
+            recession: preferences.recession
+        )
     }
 
     private func blurProgress(for angle: Double) -> Double {
@@ -946,9 +951,9 @@ final class LidController: ObservableObject {
         finishClosingOut()
     }
 
-    /// Past the full-effect angle the picture holds its lean along with its
-    /// blur and dimming. The glass has no full-effect angle: it follows the
-    /// lid's whole travel, so it takes the lid angle itself.
+    /// The picture holds its lean once it reaches the most it may lean, and
+    /// past the full-effect angle along with its blur and dimming. The glass
+    /// does not lean, so it takes the lid angle itself.
     private func applyVisual(angle: Double) {
         let progress = blurProgress(for: angle)
         let pictureAngle = capturesScreen ? ramp.pictureAngle(for: angle) : angle
