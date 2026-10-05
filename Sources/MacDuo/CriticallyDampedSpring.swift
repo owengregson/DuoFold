@@ -23,6 +23,16 @@ struct CriticallyDampedSpring {
         value += velocity * dt
     }
 
+    /// Advances toward `target` as above, but never trails `floor` while it
+    /// rises toward the target on its own at `floorSpeed`. Wherever the floor
+    /// stops, the spring carries on from there at the floor's own speed.
+    mutating func advance(to target: Double, dt: Double, floor: Double, floorSpeed: Double) {
+        advance(to: target, dt: dt)
+        guard floorSpeed > 0, floor > value else { return }
+        value = floor
+        velocity = max(velocity, floorSpeed)
+    }
+
     mutating func reset(to newValue: Double) {
         value = newValue
         velocity = 0

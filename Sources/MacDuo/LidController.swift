@@ -66,11 +66,7 @@ final class LidController: ObservableObject {
     private var lastPublishTime: CFTimeInterval = 0
 
     private var rawAngle: Double = 0
-    /// Degrees per second, negative while the lid closes.
-    private var angularVelocity: Double = 0
-    private var lastChangedAngle: Double?
-    private var lastChangeTime: CFTimeInterval = 0
-    private var lastClosingTime: CFTimeInterval = -.greatestFiniteMagnitude
+    private var motion = LidMotion()
     /// The angle the picture shows. While it follows the lid the estimator
     /// sets it every frame; the ease back to flat springs it on from there.
     private var visualAngle = CriticallyDampedSpring(frequency: 24)
@@ -84,7 +80,6 @@ final class LidController: ObservableObject {
     private var preview: PreviewRun?
     private var isSuspended = false
     private var isCapturePending = false
-    private var motionIntent = LidMotionIntent()
     private var openDwell = LidOpenDwell()
     /// Where the lid last moved to by more than `timeoutMovementThreshold`,
     /// and when. The timeout counts from there.
@@ -125,20 +120,8 @@ final class LidController: ObservableObject {
     /// carries on before waiting for pushed readings.
     private static let movementThreshold: Double = 0.3
 
-    /// Closing speed that counts as a deliberate close, in degrees per second.
-    /// A still lid reads under 0.5.
-    private static let triggerClosingSpeed: Double = 2
-
-    /// Opening speed that counts as a deliberate reversal, in degrees per second.
-    private static let triggerOpeningSpeed: Double = 2
-
     /// How long after the lid last moved down the effect may still start.
     private static let closingMemory: TimeInterval = 1.5
-
-    private static let predictionSpeedFloor: Double = 40
-
-    /// Sensor latency the prediction adds on top of the reading's own age.
-    private static let predictionLatency: TimeInterval = 0.04
 
     /// The ordinary hysteresis release waits this long. A prediction can fire
     /// while the last reading is still above the trigger angle, but deliberate
@@ -146,7 +129,7 @@ final class LidController: ObservableObject {
     private static let minimumEffectDuration: TimeInterval = 0.35
 
     /// How long a lid held above the start angle waits before it counts as
-    /// opened again, for openings slower than `triggerOpeningSpeed`.
+    /// opened again, for openings slower than `LidMotion.triggerOpeningSpeed`.
     private static let openDwellDuration: TimeInterval = 1
 
     /// Movement within this many degrees counts as holding still.
@@ -222,7 +205,7 @@ final class LidController: ObservableObject {
         estimator.reset(tuning: sensorTuning)
         if let angle = sensor.angle() {
             rawAngle = angle
-            currentAngle = angle
+            currentAngle = max(angle, 0)
             visualAngle.reset(to: angle)
             estimator.observe(angle, at: CACurrentMediaTime())
         }
@@ -304,10 +287,7 @@ final class LidController: ObservableObject {
 
     private func disableEffect() {
         stopEffectAndCapture()
-        lastChangedAngle = nil
-        angularVelocity = 0
-        lastClosingTime = -.greatestFiniteMagnitude
-        motionIntent.reset()
+        motion.reset()
         openDwell.reset()
         peakAngle = 0
         if pollTimer != nil { setPollInterval(Self.idlePollInterval) }
@@ -372,10 +352,7 @@ final class LidController: ObservableObject {
                 peakAngle = 0
                 // The next reading is the real lid, and the jump to it from
                 // the sweep's last angle would read as a fast close.
-                lastChangedAngle = nil
-                angularVelocity = 0
-                lastClosingTime = -.greatestFiniteMagnitude
-                motionIntent.reset()
+                motion.reset()
                 if isActive { setActive(false) }
                 return
             }
@@ -418,7 +395,7 @@ final class LidController: ObservableObject {
         if displayLink == nil { followHaptics(angle: angle) }
 
         if preferences.isEnabled {
-            updateVelocity(with: angle)
+            motion.update(with: angle, at: CACurrentMediaTime(), prewarmSpeed: preferences.closingSpeed)
             openDwell.update(angle: angle, at: CACurrentMediaTime(), dwellAngle: effectPolicy.dwellAngle)
             reconcile(angle: angle)
         }
@@ -526,18 +503,7 @@ final class LidController: ObservableObject {
             // Act on this reading rather than a poll later, starting from the
             // speed the pushes measured: one reading cannot measure one.
             let now = CACurrentMediaTime()
-            if abs(speed) > abs(angularVelocity) {
-                angularVelocity = speed
-                motionIntent.update(
-                    angularVelocity: speed,
-                    at: now,
-                    closingSpeed: Self.triggerClosingSpeed,
-                    openingSpeed: Self.triggerOpeningSpeed
-                )
-                if speed <= -preferences.closingSpeed { lastClosingTime = now }
-            }
-            // The reading before the sleep is too old to measure against.
-            lastChangedAngle = nil
+            motion.wake(speed: speed, at: now, prewarmSpeed: preferences.closingSpeed)
             // The picture, if one is up, carries on from where it rests. A
             // speed of zero is one the pushes could not measure.
             if preview == nil {
@@ -598,14 +564,14 @@ final class LidController: ObservableObject {
             isEnabled: preferences.isEnabled,
             isActive: isActive,
             angle: angle,
-            predictedAngle: predictedAngle(),
+            predictedAngle: motion.predictedAngle(from: rawAngle, at: now),
             riseSinceLowest: angle - lowestRunAngle,
             hasBeenAboveThreshold: peakAngle >= threshold,
-            wasClosingRecently: motionIntent.wasClosingRecently(
+            wasClosingRecently: motion.intent.wasClosingRecently(
                 at: now,
                 memoryDuration: Self.closingMemory
             ),
-            isClearlyOpening: angularVelocity >= Self.triggerOpeningSpeed,
+            isClearlyOpening: motion.isClearlyOpening,
             hasDwelledOpen: openDwell.hasDwelled(at: now, duration: Self.openDwellDuration),
             minimumDurationElapsed: minimumDurationElapsed
         )
@@ -638,11 +604,12 @@ final class LidController: ObservableObject {
         guard preferences.isEnabled, !isSuspended else { return }
         let wanted = wantsEffect(angle: angle)
         if wanted != isActive {
+            let predicted = motion.predictedAngle(from: rawAngle, at: CACurrentMediaTime())
             Diagnostics.lid.notice(
                 """
                 \(wanted ? "start" : "end", privacy: .public) raw \(angle, format: .fixed(precision: 2)) \
-                predicted \(self.predictedAngle(), format: .fixed(precision: 2)) \
-                velocity \(self.angularVelocity, format: .fixed(precision: 1)) deg/s \
+                predicted \(predicted, format: .fixed(precision: 2)) \
+                velocity \(self.motion.velocity, format: .fixed(precision: 1)) deg/s \
                 snapshot \(self.snapshotter.latestImage != nil)
                 """
             )
@@ -661,41 +628,10 @@ final class LidController: ObservableObject {
         }
     }
 
-    private func updateVelocity(with angle: Double) {
-        let now = CACurrentMediaTime()
-        guard let last = lastChangedAngle else {
-            lastChangedAngle = angle
-            lastChangeTime = now
-            return
-        }
-        if angle != last {
-            let dt = now - lastChangeTime
-            if dt > 0.001 {
-                let instant = (angle - last) / dt
-                angularVelocity = 0.5 * instant + 0.5 * angularVelocity
-            }
-            lastChangedAngle = angle
-            lastChangeTime = now
-        } else if now - lastChangeTime > 0.4 {
-            angularVelocity = 0
-        }
-        motionIntent.update(
-            angularVelocity: angularVelocity,
-            at: now,
-            closingSpeed: Self.triggerClosingSpeed,
-            openingSpeed: Self.triggerOpeningSpeed
-        )
-        if angularVelocity >= Self.triggerOpeningSpeed {
-            lastClosingTime = -.greatestFiniteMagnitude
-        } else if angularVelocity <= -preferences.closingSpeed {
-            lastClosingTime = now
-        }
-    }
-
     /// Runs only while the lid is closing, so holding it still does not leave
     /// a capture loop running.
     private func updatePrewarm(angle: Double, ceiling: Double) {
-        let closingRecently = CACurrentMediaTime() - lastClosingTime < preferences.prewarmLinger
+        let closingRecently = CACurrentMediaTime() - motion.lastClosingTime < preferences.prewarmLinger
         // The glass has nothing to warm up.
         guard capturesScreen, angle <= ceiling, closingRecently else {
             snapshotter.endPrewarm()
@@ -715,19 +651,13 @@ final class LidController: ObservableObject {
         streamer.start()
     }
 
-    /// A reading can be a full sensor refresh old, so a fast close works from
-    /// where the lid is heading rather than the last reading.
-    private func predictedAngle() -> Double {
-        guard angularVelocity < -Self.predictionSpeedFloor else { return rawAngle }
-        let staleness = min(CACurrentMediaTime() - lastChangeTime, 0.12)
-        return rawAngle + angularVelocity * (staleness + Self.predictionLatency)
-    }
-
     private func publish(angle: Double) {
         let now = CACurrentMediaTime()
         guard now - lastPublishTime > 0.08 else { return }
         lastPublishTime = now
-        if abs(currentAngle - angle) > 0.001 { currentAngle = angle }
+        // A lid pressed shut reads a little under zero, which would show as -1°.
+        let shown = max(angle, 0)
+        if abs(currentAngle - shown) > 0.001 { currentAngle = shown }
     }
 
     // MARK: - Depth effect
@@ -981,7 +911,15 @@ final class LidController: ObservableObject {
             return
         }
         let target = effectiveThreshold
-        visualAngle.advance(to: target, dt: dt)
+        if estimator.hasReading {
+            // A lid opened past the start angle takes the picture flat at
+            // least as fast as it goes, as it did up to the release. The ease
+            // only takes over where the lid stops short or falls behind it.
+            let lid = estimator.motion(at: link.targetTimestamp)
+            visualAngle.advance(to: target, dt: dt, floor: lid.angle, floorSpeed: lid.speed)
+        } else {
+            visualAngle.advance(to: target, dt: dt)
+        }
         // At or above the threshold the picture is already flat, so a lid
         // that opened past it finishes at once.
         let settled = visualAngle.value >= target - Self.closingOutSettleEpsilon
@@ -1075,10 +1013,7 @@ final class LidController: ObservableObject {
         isSuspended = false
         // A fresh baseline, so waking with a nearly shut lid does not read as
         // closing movement.
-        lastChangedAngle = nil
-        angularVelocity = 0
-        lastClosingTime = -.greatestFiniteMagnitude
-        motionIntent.reset()
+        motion.reset()
         openDwell.reset()
         peakAngle = 0
         timeoutReferenceAngle = nil

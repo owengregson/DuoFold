@@ -26,7 +26,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacDuoTests",
-            dependencies: ["MacDuo"],
+            dependencies: ["MacDuo", "LidAngleKit"],
             path: "Tests/MacDuoTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),

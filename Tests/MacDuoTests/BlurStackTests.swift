@@ -22,7 +22,7 @@ struct BlurStackTests {
             // sigma, so a little under the full Gaussian. A linear sample
             // splits its weight between the two texel centres around it.
             let phase = between ? 0.5 : 0
-            let variance = taps.reduce(0) { total, tap in
+            let variance = taps.reduce(0.0) { (total: Double, tap) in
                 let below = (tap.offset - phase).rounded(.down) + phase
                 let above = below + 1
                 let toAbove = tap.offset - below

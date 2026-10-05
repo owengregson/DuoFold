@@ -27,6 +27,93 @@ struct LidMotionIntent {
     }
 }
 
+/// How fast the lid moves, measured between the readings that changed, and
+/// what that says about where it is heading.
+struct LidMotion {
+
+    /// Closing speed that counts as a deliberate close, in degrees per second.
+    /// A still lid reads under 0.5.
+    static let triggerClosingSpeed: Double = 2
+
+    /// Opening speed that counts as a deliberate reversal, in degrees per second.
+    static let triggerOpeningSpeed: Double = 2
+
+    static let predictionSpeedFloor: Double = 40
+
+    /// Sensor latency the prediction adds on top of the reading's own age.
+    static let predictionLatency: TimeInterval = 0.04
+
+    /// Degrees per second, negative while the lid closes.
+    private(set) var velocity: Double = 0
+    private(set) var intent = LidMotionIntent()
+    /// When the lid last closed as fast as the pre-warm asks for.
+    private(set) var lastClosingTime: TimeInterval = -.greatestFiniteMagnitude
+    private var lastChangedAngle: Double?
+    private var lastChangeTime: TimeInterval = 0
+
+    var isClearlyOpening: Bool { velocity >= Self.triggerOpeningSpeed }
+
+    /// Takes one reading. The first after a reset only sets the baseline.
+    mutating func update(with angle: Double, at now: TimeInterval, prewarmSpeed: Double) {
+        guard let last = lastChangedAngle else {
+            lastChangedAngle = angle
+            lastChangeTime = now
+            return
+        }
+        if angle != last {
+            let dt = now - lastChangeTime
+            if dt > 0.001 {
+                let instant = (angle - last) / dt
+                velocity = 0.5 * instant + 0.5 * velocity
+            }
+            lastChangedAngle = angle
+            lastChangeTime = now
+        } else if now - lastChangeTime > 0.4 {
+            velocity = 0
+        }
+        intent.update(
+            angularVelocity: velocity,
+            at: now,
+            closingSpeed: Self.triggerClosingSpeed,
+            openingSpeed: Self.triggerOpeningSpeed
+        )
+        if velocity >= Self.triggerOpeningSpeed {
+            lastClosingTime = -.greatestFiniteMagnitude
+        } else if velocity <= -prewarmSpeed {
+            lastClosingTime = now
+        }
+    }
+
+    /// Readings start again after a sleep, at the speed the pushed readings
+    /// measured. The reading before the sleep is too old to measure against.
+    mutating func wake(speed: Double, at now: TimeInterval, prewarmSpeed: Double) {
+        if abs(speed) > abs(velocity) {
+            velocity = speed
+            intent.update(
+                angularVelocity: speed,
+                at: now,
+                closingSpeed: Self.triggerClosingSpeed,
+                openingSpeed: Self.triggerOpeningSpeed
+            )
+            if speed <= -prewarmSpeed { lastClosingTime = now }
+        }
+        lastChangedAngle = nil
+    }
+
+    /// A reading can be a full sensor refresh old, so a fast close works from
+    /// where the lid is heading rather than the last reading.
+    func predictedAngle(from angle: Double, at now: TimeInterval) -> Double {
+        guard velocity < -Self.predictionSpeedFloor else { return angle }
+        let staleness = min(now - lastChangeTime, 0.12)
+        return angle + velocity * (staleness + Self.predictionLatency)
+    }
+
+    /// Forgets the motion, so the next reading starts a fresh baseline.
+    mutating func reset() {
+        self = LidMotion()
+    }
+}
+
 /// How long the lid has stayed opened back above the start angle.
 struct LidOpenDwell {
     private(set) var since: TimeInterval?
@@ -85,7 +172,8 @@ struct LidHingeLimit {
     /// cannot raise the limit.
     static let holdDuration: TimeInterval = 1
 
-    /// No hinge opens past flat. A reading outside this is a sensor fault.
+    /// No hinge opens past flat. A reading outside this is a sensor fault, or
+    /// a lid pressed shut, which reads a little under zero and is no stop.
     static let plausibleAngles: ClosedRange<Double> = 0...180
 
     /// The widest angle held so far, `nil` before the first hold. It only
