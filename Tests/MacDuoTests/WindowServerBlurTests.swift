@@ -21,14 +21,31 @@ struct WindowServerBlurTests {
     func testRadiusReachesTheFilter() throws {
         let band = try #require(WindowServerBlur.makeBand(groupName: "test"))
         WindowServerBlur.setRadius(12, of: band)
-        let filters = try #require(band.filters)
-        #expect(filters.count == 1)
-        let filter = try #require(filters.first as? NSObject)
+        let filter = try #require(WindowServerBlur.blurFilter(of: band))
         #expect((filter.value(forKey: "inputRadius") as? NSNumber)?.doubleValue == 12)
         // A negative radius is clamped rather than handed on.
         WindowServerBlur.setRadius(-3, of: band)
-        let clamped = try #require(band.filters?.first as? NSObject)
+        let clamped = try #require(WindowServerBlur.blurFilter(of: band))
         #expect((clamped.value(forKey: "inputRadius") as? NSNumber)?.doubleValue == 0)
+    }
+
+    /// The window server widens a redraw under a band by the radius the
+    /// band's first blur-like filter reports. The reach filter runs first,
+    /// reports a radius wider than any screen, and moves nothing.
+    @Test
+    func testTheReachFilterRunsFirstAndReportsAScreenWideRadius() throws {
+        let band = try #require(WindowServerBlur.makeBand(groupName: "test"))
+        WindowServerBlur.setRadius(12, of: band)
+        let filters = try #require(band.filters as? [NSObject])
+        #expect(filters.count == 2)
+        let reach = try #require(filters.first)
+        #expect(reach.value(forKey: "type") as? String == "displacementMap")
+        #expect((reach.value(forKey: "inputAmount") as? NSNumber)?.doubleValue == WindowServerBlur.damageReach)
+        #expect(WindowServerBlur.damageReach >= 8192)
+        let offset = try #require(reach.value(forKey: "inputOffset") as? CGPoint)
+        #expect(offset == CGPoint(x: 1, y: 1))
+        #expect(reach.value(forKey: "inputMaskImage") != nil)
+        #expect(WindowServerBlur.blurFilter(of: band)?.value(forKey: "type") as? String == "gaussianBlur")
     }
 
     @Test
@@ -51,7 +68,7 @@ struct WindowServerBlurTests {
         )
         #expect(bands.count == planned.count)
         for (band, plan) in zip(bands, planned) {
-            let filter = try #require(band.filters?.first as? NSObject)
+            let filter = try #require(WindowServerBlur.blurFilter(of: band))
             #expect((filter.value(forKey: "inputRadius") as? NSNumber)?.doubleValue == plan.radius)
             #expect(abs(band.frame.minY - plan.bottom) < 1e-9 && abs(band.frame.maxY - plan.top) < 1e-9)
         }
