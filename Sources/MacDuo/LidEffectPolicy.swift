@@ -150,15 +150,15 @@ struct LidOpenDwell {
 }
 
 /// How long the lid has stayed pressed shut. Nobody looks at a shut screen,
-/// so a run held shut long enough takes its picture down, and puts it back
-/// up as the lid opens, so the opening still plays.
+/// so a run held shut long enough ends, and comes back as the lid opens, so
+/// the opening still plays.
 struct LidShutHold {
     /// A lid at or below this is shut. Pressed shut it reads about a degree
     /// below zero, and resting there it creeps up to half a degree above.
     static let shutAngle: Double = 1
 
-    /// How long the lid stays shut before the picture comes down.
-    static let duration: TimeInterval = 2
+    /// How long the lid stays shut before the run ends.
+    static let duration: TimeInterval = 1
 
     private(set) var since: TimeInterval?
 
