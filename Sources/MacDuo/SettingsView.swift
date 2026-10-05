@@ -192,8 +192,9 @@ struct SettingsView: View {
                 help: localized("0 keeps the sides parallel, 100 converges sharply.")
             )
         }
-        // The glass stays on the screen; only a captured picture can lean.
-        .disabled(!controller.capturesScreen)
+        // The glass leans as the captured picture does, where the window
+        // server can mesh a layer.
+        .disabled(!controller.capturesScreen && !GlassMesh.isAvailable)
     }
 
     private var hapticStyle: HapticPattern.Style {

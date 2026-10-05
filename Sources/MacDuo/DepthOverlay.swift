@@ -386,12 +386,13 @@ final class DepthOverlay {
     }
 
     /// Fades the window in once, and only once the picture has something to
-    /// draw. The picture starts flat and eases into the lid's lean from here.
+    /// draw. Over glass that cannot lean, the picture starts flat as the
+    /// glass is and eases into the lid's lean from here.
     private func reveal() {
         guard let window, !hasRevealed, renderer?.isReady == true else { return }
         hasRevealed = true
         let now = CACurrentMediaTime()
-        leanCatchUp.begin(at: now)
+        if !GlassMesh.isAvailable { leanCatchUp.begin(at: now) }
         if bridge != nil {
             handover = GlassHandover()
             Diagnostics.geometry.notice(
@@ -407,21 +408,32 @@ final class DepthOverlay {
 
     func update(progress: Double, currentAngle: Double, tuning: DepthTuning) {
         self.tuning = tuning
+        let corners = geometry.corners(
+            startAngle: startAngle,
+            currentAngle: leanCatchUp.pictureAngle(currentAngle, startAngle: startAngle, at: CACurrentMediaTime()),
+            viewingDistanceRatio: tuning.viewingDistance,
+            recession: tuning.recession,
+            screenSize: screenSize
+        )
         if showsGlass || bridge != nil, let glassView {
-            // The glass cannot lean, so it takes only the blur and dimming
-            // the captured picture gets at this point of the travel. As the
-            // bridge it keeps following the lid until the picture is over it.
-            glassView.apply(progress: progress, tuning: tuning, gradient: gradient)
+            // The glass leans, blurs and dims as the captured picture does at
+            // this point of the travel. As the bridge it keeps following the
+            // lid until the picture is over it.
+            let scale = glassView.layer?.contentsScale ?? 2
+            glassView.apply(
+                progress: progress,
+                tuning: tuning,
+                gradient: gradient,
+                lean: GlassLean(
+                    corners: corners,
+                    screenSize: screenSize,
+                    padded: DepthRenderer.paddedFrame(screenSize: screenSize, pixelScale: scale)
+                )
+            )
         }
         guard !showsGlass, let renderer, renderer.isReady else { return }
         renderer.render(
-            corners: geometry.corners(
-                startAngle: startAngle,
-                currentAngle: leanCatchUp.pictureAngle(currentAngle, startAngle: startAngle, at: CACurrentMediaTime()),
-                viewingDistanceRatio: tuning.viewingDistance,
-                recession: tuning.recession,
-                screenSize: screenSize
-            ),
+            corners: corners,
             blurStrength: gradient.blurStrength(progress: progress),
             dimStrength: gradient.dimStrength(progress: progress),
             hingeFloor: tuning.blurEvenness,

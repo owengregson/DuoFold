@@ -145,6 +145,13 @@ final class DepthRenderer {
         target.needsDisplayOnBoundsChange = true
     }
 
+    /// The picture and its black margin, in screen points, hinge at y = 0:
+    /// past it the captured picture is black.
+    nonisolated static func paddedFrame(screenSize: CGSize, pixelScale: CGFloat) -> CGRect {
+        layout(screenSize: screenSize, pixelScale: pixelScale)?.paddedFrame(screenSize: screenSize)
+            ?? CGRect(origin: .zero, size: screenSize)
+    }
+
     nonisolated private static func layout(screenSize: CGSize, pixelScale: CGFloat) -> BlurStack.Layout? {
         BlurStack.Layout(
             pictureWidth: Int((screenSize.width * pixelScale).rounded()),

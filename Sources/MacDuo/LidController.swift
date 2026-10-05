@@ -1061,11 +1061,10 @@ final class LidController: ObservableObject {
 
     /// The picture holds its lean once it reaches the most it may lean, and
     /// past the full-effect angle along with its blur and dimming. The glass
-    /// does not lean, so it takes the lid angle itself.
+    /// leans the same.
     private func applyVisual(angle: Double) {
         let progress = blurProgress(for: angle)
-        let pictureAngle = capturesScreen ? ramp.pictureAngle(for: angle) : angle
-        overlay.update(progress: progress, currentAngle: pictureAngle, tuning: tuning)
+        overlay.update(progress: progress, currentAngle: ramp.pictureAngle(for: angle), tuning: tuning)
     }
 
     private var tuning: DepthTuning {
