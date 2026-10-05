@@ -165,3 +165,56 @@ struct GlassFidelityGuardTests {
         #expect(difference.p99 < 45, "\(difference)")
     }
 }
+
+/// Whether a lid moving by a hair changes the glass by a hair, or pops: the
+/// window server's blur may switch resolution as its radius grows.
+@MainActor
+struct GlassShimmerReport {
+    @Test(.enabled(if: GlassFidelityTests.directory != nil && ProcessInfo.processInfo.environment["FIDELITY_SHIMMER"] != nil))
+    func testSmallStepsChangeTheGlassSmoothly() throws {
+        let rig = try #require(GlassFidelityRig(screen: GlassFidelityTests.screen, scale: 2))
+        var worst: [(Double, GlassFidelityRig.Difference)] = []
+        var frames: [Double: GlassFidelityRig.Frame] = [:]
+        var previous: GlassFidelityRig.Frame?
+        for step in 0..<40 {
+            let progress = 0.55 + Double(step) * 0.0025
+            let corners = GlassFidelityTests.corners(progress: progress)
+            let lean = GlassLean(corners: corners, screenSize: GlassFidelityTests.screen,
+                                 padded: DepthRenderer.paddedFrame(screenSize: GlassFidelityTests.screen, pixelScale: 2))
+            let frame = try #require(rig.glass { $0.apply(progress: progress, tuning: GlassFidelityTests.tuning, gradient: BlurGradient(), lean: lean) })
+            if let previous {
+                worst.append((progress, GlassFidelityRig.difference(previous, frame)))
+            }
+            previous = frame
+        }
+        for (progress, difference) in worst {
+            print(String(format: "shimmer step to %.4f: %@", progress, difference.description as NSString))
+        }
+        // Where the pops are, and what the glass holds there.
+        for progress in [0.59, 0.5925, 0.595, 0.6375, 0.64, 0.6425] {
+            let corners = GlassFidelityTests.corners(progress: progress)
+            let lean = GlassLean(corners: corners, screenSize: GlassFidelityTests.screen,
+                                 padded: DepthRenderer.paddedFrame(screenSize: GlassFidelityTests.screen, pixelScale: 2))
+            let frame = try #require(rig.glass { $0.apply(progress: progress, tuning: GlassFidelityTests.tuning, gradient: BlurGradient(), lean: lean) })
+            frames[progress] = frame
+        }
+        for (a, b) in [(0.59, 0.5925), (0.5925, 0.595), (0.6375, 0.64), (0.64, 0.6425)] {
+            let fa = frames[a]!, fb = frames[b]!
+            var minX = Int.max, maxX = 0, minY = Int.max, maxY = 0, count = 0
+            for y in 0..<fa.height { for x in 0..<fa.width {
+                let i = (y * fa.width + x) * 4
+                if (0..<3).contains(where: { abs(Int(fa.pixels[i + $0]) - Int(fb.pixels[i + $0])) > 40 }) {
+                    count += 1; minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+                }
+            } }
+            print("pop \(a) -> \(b): \(count) px over 40, x \(minX)...\(maxX) y \(minY)...\(maxY) (px from top left)")
+            if count > 0 {
+                GlassFidelityRig.writeCrop([fa, fb, GlassFidelityRig.amplified(fa, fb, gain: 4)],
+                                           x: max(minX - 40, 0)..<min(maxX + 40, fa.width), y: max(minY - 40, 0)..<min(maxY + 40, fa.height), zoom: 3,
+                                           to: URL(fileURLWithPath: GlassFidelityTests.directory!).appendingPathComponent("pop-\(b).png"))
+            }
+        }
+        let plan = { (p: Double) in FrostBandLayout().bands(for: FrostedGlassView.blurProfile(progress: p, tuning: GlassFidelityTests.tuning, gradient: BlurGradient(), height: 982), maximumRadius: 491) }
+        for p in [0.59, 0.5925, 0.595] { print("bands at \(p): \(plan(p).map { String(format: "r%.2f %.0f-%.0f", $0.radius, $0.bottom, $0.top) }.joined(separator: " | "))") }
+    }
+}

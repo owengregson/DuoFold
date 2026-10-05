@@ -1026,6 +1026,39 @@ final class LidController: ObservableObject {
         displayLink = nil
     }
 
+    /// One line a second while the glass is up: how many frames were drawn,
+    /// how many laid the glass out afresh, the angles drawn, and whether the
+    /// sensor was being polled, to tell a still effect from a restless one.
+    private struct GlassFrameLog {
+        var started: CFTimeInterval = 0
+        var frames = 0
+        var firstChanges = 0
+        var low = Double.infinity, high = -Double.infinity
+    }
+    private var glassFrameLog = GlassFrameLog()
+
+    private func logGlassFrame(angle: Double, at now: CFTimeInterval) {
+        guard !capturesScreen, overlay.isVisible else {
+            glassFrameLog = GlassFrameLog()
+            return
+        }
+        if glassFrameLog.frames == 0 {
+            glassFrameLog.started = now
+            glassFrameLog.firstChanges = overlay.glassChanges
+        }
+        glassFrameLog.frames += 1
+        glassFrameLog.low = min(glassFrameLog.low, angle)
+        glassFrameLog.high = max(glassFrameLog.high, angle)
+        guard now - glassFrameLog.started >= 1 else { return }
+        let log = glassFrameLog
+        let changes = overlay.glassChanges - log.firstChanges
+        let progress = blurProgress(for: log.high)
+        Diagnostics.geometry.notice(
+            "glass second: \(log.frames) frames, \(changes) laid out afresh, angle \(log.low, format: .fixed(precision: 3))...\(log.high, format: .fixed(precision: 3)), progress \(progress, format: .fixed(precision: 3)), polling \(self.pollTimer != nil), preview \(self.preview != nil)"
+        )
+        glassFrameLog = GlassFrameLog()
+    }
+
     @objc private func step(_ link: CADisplayLink) {
         let now = CACurrentMediaTime()
         let rawInterval = now - lastFrameTime
@@ -1045,6 +1078,7 @@ final class LidController: ObservableObject {
                 visualAngle.reset(to: rawAngle)
             }
             applyVisual(angle: visualAngle.value)
+            logGlassFrame(angle: visualAngle.value, at: now)
             followHaptics(angle: visualAngle.value)
             if awaitsFirstEffect, isActive, blurProgress(for: visualAngle.value) > 0 {
                 awaitsFirstEffect = false
