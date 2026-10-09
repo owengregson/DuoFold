@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/owengregson/mac-duo-rebirth/releases/download/dev/Duo-Fold-dev.dmg"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/buttons/dmg-dark.svg"><img src="assets/buttons/dmg-light.svg" height="80" alt="Download DMG"></picture></a>
-  <a href="https://github.com/owengregson/mac-duo-rebirth/releases"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/buttons/releases-dark.svg"><img src="assets/buttons/releases-light.svg" height="80" alt="All releases"></picture></a>
+  <a href="https://github.com/owengregson/DuoFold/releases/download/dev/Duo-Fold-dev.dmg"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/buttons/dmg-dark.svg"><img src="assets/buttons/dmg-light.svg" height="80" alt="Download DMG"></picture></a>
+  <a href="https://github.com/owengregson/DuoFold/releases"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/buttons/releases-dark.svg"><img src="assets/buttons/releases-light.svg" height="80" alt="All releases"></picture></a>
 </p>
 
 <p align="center">
@@ -142,7 +142,7 @@ scripts/                make-app-icon.swift draws the app icon
 
 **Contributing**
 
-- Open an [issue](https://github.com/owengregson/mac-duo-rebirth/issues) before anything bigger than a fix, so the design can be talked through first.
+- Open an [issue](https://github.com/owengregson/DuoFold/issues) before anything bigger than a fix, so the design can be talked through first.
 - Private Core Animation stays inside `WindowServerBlur.swift`, looked up by name and checked before use. A missing class means the capture fallback, never a crash.
 - Every user-facing string goes in both `en.lproj` and `zh-Hans.lproj`; `LocalizableStringsTests` keeps them in step.
 - Tuning values come from measurements. When you change one, leave the measurement in the comment beside it, as the code does now.
