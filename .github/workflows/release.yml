@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: mac-duo-release
+  group: duofold-release
   cancel-in-progress: false
   queue: max
 
@@ -60,7 +60,11 @@ jobs:
             echo "zip=Duo-Fold-dev.zip"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Validate signing secrets
+      # With every Developer ID secret set, the build is signed and notarized.
+      # With none, it is signed ad hoc, which Gatekeeper asks the user to
+      # allow once. Some but not all is a mistake in the setup.
+      - name: Check signing secrets
+        id: signing
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -70,10 +74,21 @@ jobs:
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
         run: |
           set -euo pipefail
-          for name in APPLE_CERTIFICATE_P12_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_TEAM_ID \
-            APPLE_NOTARY_KEY_P8_BASE64 APPLE_NOTARY_KEY_ID APPLE_NOTARY_ISSUER_ID; do
-            [[ -n "${!name}" ]] || { echo "::error::Missing secret: $name"; exit 1; }
+          NAMES=(APPLE_CERTIFICATE_P12_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_TEAM_ID \
+            APPLE_NOTARY_KEY_P8_BASE64 APPLE_NOTARY_KEY_ID APPLE_NOTARY_ISSUER_ID)
+          MISSING=()
+          for name in "${NAMES[@]}"; do
+            [[ -n "${!name:-}" ]] || MISSING+=("$name")
           done
+          if [[ ${#MISSING[@]} -eq 0 ]]; then
+            echo "notarize=true" >> "$GITHUB_OUTPUT"
+          elif [[ ${#MISSING[@]} -eq ${#NAMES[@]} ]]; then
+            echo "::warning::No Developer ID secrets are set, so this build is signed ad hoc and not notarized"
+            echo "notarize=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Missing secrets: ${MISSING[*]}"
+            exit 1
+          fi
 
       - name: Build universal app
         run: |
@@ -82,6 +97,7 @@ jobs:
           lipo "$APP_PATH/Contents/MacOS/DuoFold" -verify_arch arm64 x86_64
 
       - name: Install Developer ID credentials
+        if: steps.signing.outputs.notarize == 'true'
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -121,6 +137,7 @@ jobs:
           echo "SIGNING_IDENTITY=$IDENTITIES" >> "$GITHUB_ENV"
 
       - name: Sign release app
+        if: steps.signing.outputs.notarize == 'true'
         env:
           APP_VERSION: ${{ steps.meta.outputs.version }}
           BUILD_VERSION: ${{ steps.meta.outputs.build }}
@@ -140,6 +157,7 @@ jobs:
           printf '%s\n' "$INFO" | grep -q 'flags=.*runtime'
 
       - name: Package signed DMG
+        if: steps.signing.outputs.notarize == 'true'
         env:
           DMG_NAME: ${{ steps.meta.outputs.dmg }}
         run: |
@@ -157,6 +175,7 @@ jobs:
           echo "DMG_PATH=$DMG_PATH" >> "$GITHUB_ENV"
 
       - name: Notarize DMG
+        if: steps.signing.outputs.notarize == 'true'
         env:
           APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
@@ -182,6 +201,7 @@ jobs:
           fi
 
       - name: Staple tickets and package ZIP
+        if: steps.signing.outputs.notarize == 'true'
         env:
           ZIP_NAME: ${{ steps.meta.outputs.zip }}
         run: |
@@ -196,6 +216,41 @@ jobs:
           ZIP_PATH="$DIST_PATH/$ZIP_NAME"
           ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
           echo "ZIP_PATH=$ZIP_PATH" >> "$GITHUB_ENV"
+
+      - name: Sign release app ad hoc
+        if: steps.signing.outputs.notarize != 'true'
+        env:
+          APP_VERSION: ${{ steps.meta.outputs.version }}
+          BUILD_VERSION: ${{ steps.meta.outputs.build }}
+        run: |
+          set -euo pipefail
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$APP_PATH/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_VERSION" "$APP_PATH/Contents/Info.plist"
+          # As build.sh signs it, again now that the version is stamped in.
+          codesign --force --options runtime --timestamp=none --sign - "$APP_PATH"
+          codesign --verify --strict --all-architectures "$APP_PATH"
+
+      - name: Package ad hoc DMG and ZIP
+        if: steps.signing.outputs.notarize != 'true'
+        env:
+          DMG_NAME: ${{ steps.meta.outputs.dmg }}
+          ZIP_NAME: ${{ steps.meta.outputs.zip }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$DIST_PATH"
+          STAGING="$(mktemp -d "$RUNNER_TEMP/dmg-staging.XXXXXX")"
+          trap 'rm -rf "$STAGING"' EXIT
+          ditto "$APP_PATH" "$STAGING/Duo Fold.app"
+          ln -s /Applications "$STAGING/Applications"
+          DMG_PATH="$DIST_PATH/$DMG_NAME"
+          hdiutil create -volname 'Duo Fold' -srcfolder "$STAGING" \
+            -fs HFS+ -format UDZO "$DMG_PATH"
+          ZIP_PATH="$DIST_PATH/$ZIP_NAME"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
+          {
+            echo "DMG_PATH=$DMG_PATH"
+            echo "ZIP_PATH=$ZIP_PATH"
+          } >> "$GITHUB_ENV"
 
       - name: Remove signing credentials
         if: always()
@@ -230,15 +285,21 @@ jobs:
       - name: Write release notes
         env:
           BUILD_LABEL: ${{ steps.meta.outputs.label }}
+          NOTARIZED: ${{ steps.signing.outputs.notarize }}
         run: |
           set -euo pipefail
           {
             printf '**Duo Fold %s**\n\n' "$BUILD_LABEL"
             printf 'Commit: `%s`\n\n' "$GITHUB_SHA"
             printf 'Open the DMG and drag **Duo Fold** to **Applications**, or extract the ZIP.\n\n'
+            if [[ "$NOTARIZED" != true ]]; then
+              printf 'This build is signed ad hoc, not notarized, so macOS blocks it the first time it opens. '
+              printf 'Allow it under **System Settings > Privacy & Security > Open Anyway**, or run:\n\n'
+              printf '```sh\nxattr -dr com.apple.quarantine "/Applications/Duo Fold.app"\n```\n\n'
+            fi
             printf 'Requires macOS 14 or later and a MacBook with a compatible lid angle sensor.\n'
             printf 'Includes Apple Silicon and Intel binaries.\n\n'
-            printf 'Grant Screen Recording permission when prompted to enable the effect.\n'
+            printf 'No permissions are needed. Screen Recording is asked for only if macOS cannot draw the effect itself and Duo Fold falls back to capturing the screen.\n'
           } > "$DIST_PATH/NOTES.md"
 
       - name: Publish development build
