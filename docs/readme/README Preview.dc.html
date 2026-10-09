@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<title>Duo Fold README Preview</title>
+<style>
+html,body{margin:0;background:#010409;}
+a{color:#4493f8;text-decoration:none;}
+a:hover{text-decoration:underline;color:#4493f8;}
+</style>
+</helmet>
+<div style="min-height:100vh;background:#0d1117;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans',Helvetica,Arial,sans-serif;color:#f0f6fc;padding:32px 16px 64px;box-sizing:border-box;">
+  <div style="max-width:920px;margin:0 auto;display:flex;flex-direction:column;gap:24px;">
+    <div data-screen-label="README dark" style="border:1px solid #3d444d;border-radius:6px;overflow:hidden;">
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid #3d444d;background:#0d1117;font-size:14px;font-weight:600;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9198a1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"></path><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"></path></svg>
+        <span style="border-bottom:2px solid #f78166;padding-bottom:9px;margin-bottom:-11px;">README</span>
+        <span style="color:#9198a1;font-weight:400;">Apache-2.0 license</span>
+      </div>
+      <div style="padding:32px;font-size:16px;line-height:1.5;display:flex;flex-direction:column;gap:16px;">
+
+        <div style="text-align:center;"><img src="readme/assets/hero.svg" data-art="hero" alt="Duo Fold: the iPhone Duo effect on macOS, done right" style="width:860px;max-width:100%;"></div>
+
+        <div style="display:flex;justify-content:center;flex-wrap:wrap;gap:4px;">
+          <a href="#"><img src="readme/assets/buttons/dmg-dark.svg" alt="Download DMG" style="height:80px;"></a>
+          <a href="#"><img src="readme/assets/buttons/releases-dark.svg" alt="All releases" style="height:80px;"></a>
+        </div>
+
+        <p style="margin:0;text-align:center;text-wrap:pretty;">Duo Fold brings the iPhone Duo effect to your MacBook. Close the lid and the screen leans back, blurs and dims toward the far edge while it stays sharp at the hinge. Free and open source, it runs from the menu bar and needs no permissions. Works on MacBooks with a lid angle sensor; Duo Fold tells you if yours has none.</p>
+
+        <div style="border-left:4px solid #238636;padding:8px 16px;display:flex;flex-direction:column;gap:4px;">
+          <div style="display:flex;align-items:center;gap:8px;color:#3fb950;font-weight:500;font-size:16px;">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="#3fb950"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path></svg>
+            <span>Tip</span>
+          </div>
+          <p style="margin:0;">You don't have to close the lid to see it. Open Duo Fold from the menu bar and press <strong>Preview</strong>: the effect plays once, and <kbd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;padding:3px 5px;background:#151b23;border:1px solid #3d444d;border-radius:6px;box-shadow:inset 0 -1px 0 #3d444d;">Esc</kbd> ends it at any time.</p>
+        </div>
+
+        <div style="height:8px;"></div>
+        <div style="text-align:center;"><img src="readme/assets/headers/presets-dark.svg" alt="Presets" style="height:60px;"></div>
+        <p style="margin:0;">Each preset sets nine values: where the effect starts, how long it takes to build, how blurred and dark it gets, and how the picture leans. The sliders fine-tune from there.</p>
+        <div style="text-align:center;"><img src="readme/assets/diagrams/presets.svg" alt="Presets" style="width:860px;max-width:100%;"></div>
+        <p style="margin:0;text-align:center;font-size:12px;">Blur in the thumbnails is exaggerated so it reads at this size.</p>
+
+        <div style="height:8px;"></div>
+        <div style="text-align:center;"><img src="readme/assets/headers/fold-dark.svg" alt="The fold" style="height:60px;"></div>
+        <p style="margin:0;">The effect depends on two things: how far the lid has closed, and how high up the screen a pixel sits. Near the hinge the picture stays sharp. Toward the far edge it blurs and darkens.</p>
+        <div style="text-align:center;"><img src="readme/assets/diagrams/anatomy.svg" data-art="anatomy" alt="Anatomy of the effect" style="width:860px;max-width:100%;"></div>
+        <p style="margin:0;">Past the start angle, blur, dimming and lean each ramp up on their own curve. Blur starts slowly, so a small nudge leaves the screen readable. Dimming arrives early. The lean eases into its limit instead of stopping dead.</p>
+        <div style="text-align:center;"><img src="readme/assets/diagrams/curve.svg" data-art="curve" alt="The curve" style="width:860px;max-width:100%;"></div>
+        <p style="margin:0;text-align:center;font-size:12px;">Plotted from <code style="font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;font-size:85%;background:rgba(101,108,118,0.2);padding:.2em .4em;border-radius:6px;">LidEffectRamp</code> and <code style="font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;font-size:85%;background:rgba(101,108,118,0.2);padding:.2em .4em;border-radius:6px;">BlurGradient</code>, the same math the renderer runs. The ticks along the bottom are where the trackpad taps.</p>
+
+        <div style="height:8px;"></div>
+        <div style="text-align:center;"><img src="readme/assets/headers/haptics-dark.svg" alt="Haptics" style="height:60px;"></div>
+        <p style="margin:0;">The trackpad taps as the lid closes. Taps follow the same progress that drives the blur, from where the effect starts to full strength, and, if you choose, on the way back up.</p>
+        <div style="text-align:center;"><img src="readme/assets/diagrams/haptics.svg" data-art="haptics" alt="Haptic patterns" style="width:860px;max-width:100%;"></div>
+        <p style="margin:0;text-align:center;font-size:12px;">Each bar is one tap, as tall as it is strong. A lid resting on a tap has to back off a little before that tap plays again, so a sensor reading that flickers never buzzes.</p>
+
+        <div style="height:8px;"></div>
+        <div style="text-align:center;"><img src="readme/assets/headers/technical-dark.svg" alt="Technical design" style="height:60px;"></div>
+        <p style="margin:0;">Duo Fold is built to be invisible until the lid moves: nothing polls, nothing is captured, nothing asks for permission. Then the picture moves at every screen refresh, from a sensor that reports ten times a second.</p>
+        <div style="text-align:center;"><img src="readme/assets/diagrams/engineering.svg" alt="Technical design" style="width:860px;max-width:100%;"></div>
+        <ul style="margin:0;padding-left:2em;display:flex;flex-direction:column;gap:4px;">
+          <li><strong>Asleep until the lid moves.</strong> The sensor pushes its own readings, so the app polls nothing while the lid rests. Measured: no CPU time and no idle wakeups.</li>
+          <li><strong>An angle for every frame.</strong> A Kalman filter turns readings 104 ms apart into a position for every refresh, and never runs ahead of the lid.</li>
+          <li><strong>Drawn by the window server.</strong> <code style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:85%;background:rgba(101,108,118,0.2);padding:.2em .4em;border-radius:6px;">CABackdropLayer</code> blurs the screen live on the GPU. The app never sees a pixel and never asks for Screen Recording.</li>
+          <li><strong>On screen at the next refresh.</strong> The glass is built ahead. If macOS can't draw it, a ScreenCaptureKit and Metal fallback takes over, matched to the glass.</li>
+        </ul>
+
+        <div style="height:8px;"></div>
+        <div style="text-align:center;"><img src="readme/assets/headers/settings-dark.svg" alt="Settings" style="height:60px;"></div>
+        <div style="display:flow-root;">
+          <img src="readme/assets/menu.png" alt="The Duo Fold settings panel" style="float:right;width:300px;max-width:45%;margin:0 0 8px 16px;">
+          <p style="margin:0 0 16px;">Everything lives in one panel under the menu bar icon. The gauge at the top shows the live lid angle against where the effect starts and where it peaks.</p>
+          <p style="margin:0 0 16px;"><strong>Effect.</strong> Preset, start angle, how much further the lid closes to reach full effect, an optional timeout, blur and dimming with their spread, lean back, max lean, perspective, and live rendering.</p>
+          <p style="margin:0 0 16px;"><strong>Haptics.</strong> Pattern, strength, number of taps, and whether to tap while opening. <strong>Try</strong> plays the pattern now.</p>
+          <p style="margin:0 0 16px;"><strong>General.</strong> Language, launch at login, the menu bar icon and angle, and a full reset.</p>
+          <p style="margin:0;"><strong>Preview</strong> plays the effect once without closing the lid. Press <kbd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;padding:3px 5px;background:#151b23;border:1px solid #3d444d;border-radius:6px;box-shadow:inset 0 -1px 0 #3d444d;">Esc</kbd> to end it.</p>
+        </div>
+
+        <div style="height:8px;"></div>
+        <div style="text-align:center;"><img src="readme/assets/headers/developers-dark.svg" alt="Developers" style="height:60px;"></div>
+        <p style="margin:0;">Duo Fold is a Swift package with no third-party dependencies. It builds with Xcode and Swift 6.0 or later; <code style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:85%;background:rgba(101,108,118,0.2);padding:.2em .4em;border-radius:6px;">mise install</code> fetches a toolchain if you use <a href="#">mise</a>.</p>
+        <pre style="margin:0;padding:16px;background:#151b23;border-radius:6px;overflow:auto;font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;font-size:13.6px;line-height:1.45;color:#f0f6fc;">./build.sh              <span style="color:#9198a1;"># build and sign build/Duo Fold.app</span>
+./build.sh --run        <span style="color:#9198a1;"># build, sign and relaunch</span>
+./build.sh --universal  <span style="color:#9198a1;"># one binary for Apple Silicon and Intel</span>
+swift test              <span style="color:#9198a1;"># unit tests</span></pre>
+        <p style="margin:0;">The app is signed ad hoc unless <code style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:85%;background:rgba(101,108,118,0.2);padding:.2em .4em;border-radius:6px;">SIGN_IDENTITY</code> names your own identity. The build also leaves <code style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:85%;background:rgba(101,108,118,0.2);padding:.2em .4em;border-radius:6px;">build/lidprobe</code> next to the app, for checking the sensor:</p>
+        <pre style="margin:0;padding:16px;background:#151b23;border-radius:6px;overflow:auto;font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;font-size:13.6px;line-height:1.45;color:#f0f6fc;">build/lidprobe          <span style="color:#9198a1;"># stream the angle</span>
+build/lidprobe rate     <span style="color:#9198a1;"># how often the hardware value changes</span>
+build/lidprobe reset    <span style="color:#9198a1;"># put the sensor back to pushing once a second</span></pre>
+        <div style="border-left:4px solid #1f6feb;padding:8px 16px;display:flex;flex-direction:column;gap:4px;">
+          <div style="display:flex;align-items:center;gap:8px;color:#4493f8;font-weight:500;">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="#4493f8"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>
+            <span>Note</span>
+          </div>
+          <p style="margin:0;">The sensor's push rate is system-wide and outlives the app. Duo Fold restores it when it quits or the Mac sleeps, but can't after a force quit; <code style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:85%;background:rgba(101,108,118,0.2);padding:.2em .4em;border-radius:6px;">build/lidprobe reset</code> puts it back.</p>
+        </div>
+        <div style="text-align:center;"><img src="readme/assets/diagrams/pipeline.svg" data-art="pipeline" alt="Module map" style="width:860px;max-width:100%;"></div>
+        <pre style="margin:0;padding:16px;background:#151b23;border-radius:6px;overflow:auto;font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;font-size:13.6px;line-height:1.45;color:#f0f6fc;">Sources/
+  LidAngleKit/          LidAngleSensor: the HID lid angle sensor, shared with lidprobe
+  DuoFold/
+    LidController         polls, sleeps and wakes; drives everything below
+    LidAngleEstimator     Kalman filter: an angle for every frame
+    LidWake               push watch, wake filter, clamshell watch
+    LidEffectPolicy       motion intent and LidEffectRamp
+    BlurGradient          how blurred and dark each height is
+    WindowServerBlur      private Core Animation, looked up and checked at runtime
+    FrostedGlassView      the glass: FrostBandLayout, GlassLean, ScreenCorner
+    ScreenStreamer        capture fallback: BlurStack, DepthRenderer, DepthShaders
+    HapticPattern         tap patterns, played by TrackpadHaptics
+    EffectPreset          the five presets; Preferences stores the rest
+    SettingsView          the menu bar panel, opened by StatusItemController
+  lidprobe/             command-line probe for the sensor
+Tests/DuoFoldTests/     unit tests, plus glass fidelity reports behind FIDELITY_DIR
+scripts/                make-app-icon.swift draws the app icon</pre>
+        <p style="margin:0;"><strong>Contributing</strong></p>
+        <ul style="margin:0;padding-left:2em;display:flex;flex-direction:column;gap:4px;">
+          <li>Open an <a href="#">issue</a> before anything bigger than a fix, so the design can be talked through first.</li>
+          <li>Private Core Animation stays inside <code style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:85%;background:rgba(101,108,118,0.2);padding:.2em .4em;border-radius:6px;">WindowServerBlur.swift</code>, looked up by name and checked before use. A missing class means the capture fallback, never a crash.</li>
+          <li>Every user-facing string goes in both <code style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:85%;background:rgba(101,108,118,0.2);padding:.2em .4em;border-radius:6px;">en.lproj</code> and <code style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:85%;background:rgba(101,108,118,0.2);padding:.2em .4em;border-radius:6px;">zh-Hans.lproj</code>; <code style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:85%;background:rgba(101,108,118,0.2);padding:.2em .4em;border-radius:6px;">LocalizableStringsTests</code> keeps them in step.</li>
+          <li>Tuning values come from measurements. When you change one, leave the measurement in the comment beside it, as the code does now.</li>
+          <li>Run <code style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:85%;background:rgba(101,108,118,0.2);padding:.2em .4em;border-radius:6px;">swift test</code> before a pull request. The fidelity tests are slow and only run with <code style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:85%;background:rgba(101,108,118,0.2);padding:.2em .4em;border-radius:6px;">FIDELITY_DIR=&lt;folder&gt;</code> set; they write the frames side by side for comparison.</li>
+          <li>Read the app's logs with <code style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:85%;background:rgba(101,108,118,0.2);padding:.2em .4em;border-radius:6px;">log show --last 5m --predicate 'subsystem == "com.owengregson.duofold"'</code>.</li>
+        </ul>
+
+        <div style="height:8px;"></div>
+        <div style="text-align:center;"><img src="readme/assets/divider-dark.svg" alt="" style="height:28px;"></div>
+        <p style="margin:0;text-align:center;font-size:12px;">Derived from <a href="#">Mac Duo</a> by Makito. Built with AI assistance. Icons from <a href="#">Lucide</a>.</p>
+        <p style="margin:0;text-align:center;font-size:12px;">Licensed under the <a href="#">Apache License 2.0</a>. Copyright 2026 owengregson. See <a href="#">NOTICE</a> for attribution.</p>
+        <p style="margin:0;text-align:center;font-size:12px;"><b>DUO FOLD</b> by <a href="#">@owengregson</a></p>
+      </div>
+    </div>
+
+    <sc-if value="{{ showLightKit }}" hint-placeholder-val="{{ true }}">
+      <div data-screen-label="Light mode kit" style="border:1px solid #d1d9e0;border-radius:6px;background:#ffffff;color:#1f2328;padding:32px;display:flex;flex-direction:column;align-items:center;gap:12px;">
+        <div style="font-size:14px;font-weight:600;color:#59636e;">Light mode variants (swapped in by &lt;picture&gt; on GitHub)</div>
+        <div style="display:flex;justify-content:center;flex-wrap:wrap;gap:4px;">
+          <img src="readme/assets/buttons/dmg-light.svg" alt="Download DMG" style="height:80px;">
+          <img src="readme/assets/buttons/releases-light.svg" alt="All releases" style="height:80px;">
+        </div>
+        <img src="readme/assets/headers/presets-light.svg" alt="Presets" style="height:60px;">
+        <img src="readme/assets/headers/fold-light.svg" alt="The fold" style="height:60px;">
+        <img src="readme/assets/headers/haptics-light.svg" alt="Haptics" style="height:60px;">
+        <img src="readme/assets/headers/technical-light.svg" alt="Technical design" style="height:60px;">
+        <img src="readme/assets/headers/settings-light.svg" alt="Settings" style="height:60px;">
+        <img src="readme/assets/headers/developers-light.svg" alt="Developers" style="height:60px;">
+        <img src="readme/assets/divider-light.svg" alt="" style="height:28px;">
+      </div>
+    </sc-if>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showLightKit&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Preview&quot;}}">
+class Component extends DCLogic {
+  async componentDidMount() {
+    const names = { hero: 'hero', anatomy: 'diagrams/anatomy', curve: 'diagrams/curve', haptics: 'diagrams/haptics', pipeline: 'diagrams/pipeline' };
+    for (const [k, p] of Object.entries(names)) {
+      try {
+        const txt = await (await fetch('readme/full/' + p + '.svg.txt')).text();
+        const url = URL.createObjectURL(new Blob([txt], { type: 'image/svg+xml' }));
+        document.querySelectorAll('img[data-art="' + k + '"]').forEach(img => { img.src = url; });
+      } catch (e) {}
+    }
+  }
+  renderVals() {
+    return { showLightKit: this.props.showLightKit ?? true };
+  }
+}
+</script>
+</body>
+</html>
